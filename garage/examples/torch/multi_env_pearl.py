@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """PEARL ML1 example."""
 import click
+import sys
+import os
+sys.path.append(os.path.abspath(os.getcwd()))
 
 from garage import wrap_experiment
 from garage.envs import MetaWorldSetTaskEnv, normalize
@@ -37,12 +40,12 @@ from garage.envs import normalize, PointEnv
 @wrap_experiment
 def pearl_point_env(ctxt=None,
                              seed=1,
-                             num_epochs=9,
-                             num_train_tasks=5,
-                             num_test_tasks=2,
-                             latent_size=7,
-                             encoder_hidden_size=64,
-                             net_size=300,
+                             num_epochs=30,
+                             num_train_tasks=20,
+                             num_test_tasks=20,
+                             latent_size=2,
+                             encoder_hidden_size=16,
+                             net_size=64,
                              meta_batch_size=16,
                              num_steps_per_epoch=400,
                              num_initial_steps=400,
