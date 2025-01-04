@@ -24,7 +24,7 @@ from garage.torch.policies import ContextConditionedPolicy
 class PEARL(MetaRLAlgorithm):
     r"""A PEARL model based on https://arxiv.org/abs/1903.08254.
 
-    PEARL, which stands for Probablistic Embeddings for Actor-Critic
+        PEARL, which stands for Probablistic Embeddings for Actor-Critic
     Reinforcement Learning, is an off-policy meta-RL algorithm. It is built
     on top of SAC using two Q-functions and a value function with an addition
     of an inference network that estimates the posterior :math:`q(z \| c)`.
@@ -283,7 +283,7 @@ class PEARL(MetaRLAlgorithm):
                     self._obtain_samples(trainer, epoch,
                                          self._num_initial_steps, np.inf)
                     self._is_resuming = False
-            breakpoint = True
+
             # obtain samples from random tasks
             for _ in range(self._num_tasks_sample):
                 idx = np.random.randint(self._num_train_tasks)

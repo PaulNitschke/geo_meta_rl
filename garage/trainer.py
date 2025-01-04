@@ -175,7 +175,7 @@ class Trainer:
                         batch_size=None,
                         agent_update=None,
                         env_update=None):
-        """Obtain one batch of episodes.
+        """Obtain one batch of episodesb
 
         Args:
             itr (int): Index of iteration (epoch).
