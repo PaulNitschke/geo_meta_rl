@@ -242,9 +242,9 @@ class CLContextConditionedPolicy(nn.Module):
         Compute the contrastive loss between the current trajectory embedding and positive/negative trajectory embeddings.
 
         Parameters:
-        - emb_current_traj (torch.Tensor): Embedding of the current trajectory TODO, add shapes.
-        - emb_positive_traj (torch.Tensor): Embedding of the positive trajectory.
-        - emb_negative_traj (torch.Tensor): Embedding of the negative trajectory.
+        - emb_current_traj (torch.Tensor): Embedding of the current trajectory of shape (embedding_batch_size, embedding_dim).
+        - emb_positive_traj (torch.Tensor): Embedding of the positive trajectory of shape (embedding_batch_size, embedding_dim).
+        - emb_negative_traj (torch.Tensor): Embedding of the negative trajectory of shape (embedding_batch_size, n_negative_samples, embedding_dim).
 
         Returns:
         - contrastive_loss (torch.Tensor): Contrastive loss value.

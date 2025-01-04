@@ -370,15 +370,14 @@ class CLMETA(MetaRLAlgorithm):
         self._policy.infer_posterior(pos_context)
         pos_z = self._policy.z
 
-        neg_task_indices=[]
         neg_z = torch.zeros((num_tasks, self._n_negative_samples, self._latent_dim))
         for idx, index_task in enumerate(indices):
             _current_neg_indeces_task = [i for i in range(self._num_train_tasks) if i != index_task]
-            neg_task_indices.append(np.random.choice(_current_neg_indeces_task, self._n_negative_samples))
+            neg_task_indices=np.random.choice(_current_neg_indeces_task, self._n_negative_samples)
             neg_context = self._sample_context(neg_task_indices)
             self._policy.infer_posterior(neg_context)
             neg_z[idx,:,:] = self._policy.z.detach()
-        cont_loss = self._policy.contrastive_loss(current_z, pos_z, neg_z)    
+        cont_loss = self._policy.compute_contrastive_loss(current_z, pos_z, neg_z)    
         cont_loss.backward(retain_graph=True)    
 
         zero_optim_grads(self.qf1_optimizer)

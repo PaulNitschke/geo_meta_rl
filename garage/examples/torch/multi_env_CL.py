@@ -15,7 +15,7 @@ from garage.torch import set_gpu_mode
 from garage.torch.algos import CLMETA
 from garage.torch.algos.pearl import PEARLWorker
 from garage.torch.embeddings import MLPEncoder
-from garage.torch.policies import (ContextConditionedPolicy,
+from garage.torch.policies import (CLContextConditionedPolicy,
                                    TanhGaussianMLPPolicy)
 from garage.torch.q_functions import ContinuousMLPQFunction
 from garage.trainer import Trainer
@@ -46,6 +46,7 @@ def CL_point_env(ctxt=None,
                              latent_size=2,
                              encoder_hidden_size=16,
                              net_size=64,
+                             n_negative_samples=5,
                              meta_batch_size=16,
                              num_steps_per_epoch=400,
                              num_initial_steps=400,
@@ -128,7 +129,7 @@ def CL_point_env(ctxt=None,
 
     pearl = CLMETA(
         env=env,
-        policy_class=ContextConditionedPolicy,
+        policy_class=CLContextConditionedPolicy,
         encoder_class=MLPEncoder,
         inner_policy=inner_policy,
         qf=qf,
@@ -137,6 +138,7 @@ def CL_point_env(ctxt=None,
         num_train_tasks=num_train_tasks,
         num_test_tasks=num_test_tasks,
         latent_dim=latent_size,
+        n_negative_samples=n_negative_samples,
         encoder_hidden_sizes=encoder_hidden_sizes,
         test_env_sampler=test_env_sampler,
         meta_batch_size=meta_batch_size,

@@ -84,7 +84,7 @@ class PointEnv(Environment):
                 `observation_space`.
             dict: The episode-level information.
                 Note that this is not part of `env_info` provided in `step()`.
-                It contains information of he entire episode， which could be
+                It contains information of the entire episode， which could be
                 needed to determine the first action (e.g. in the case of
                 goal-conditioned or MTRL.)
 
@@ -184,7 +184,7 @@ class PointEnv(Environment):
 
     # pylint: disable=no-self-use
     def sample_tasks(self, num_tasks):
-        """Sample a list of `num_tasks` tasks.
+        """Sample a list of `num_tasks` tasks. Tasks are uniformly distributed on circle with radius 2.
 
         Args:
             num_tasks (int): Number of tasks to sample.
@@ -195,8 +195,16 @@ class PointEnv(Environment):
                 point in 2D space.
 
         """
-        goals = np.random.uniform(-2, 2, size=(num_tasks, 2))
+        angles = np.linspace(0, 2 * np.pi, num_tasks, endpoint=False)
+        radius=2
+        x = radius * np.cos(angles)
+        y = radius * np.sin(angles)
+        goals = [np.array([x[i], y[i]]) for i in range(num_tasks)]
         tasks = [{'goal': goal} for goal in goals]
+        breakpoint = True
+
+        # goals = np.random.uniform(-2, 2, size=(num_tasks, 2))
+        # tasks = [{'goal': goal} for goal in goals]
         return tasks
 
     def set_task(self, task):
