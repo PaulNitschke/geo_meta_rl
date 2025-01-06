@@ -201,7 +201,6 @@ class PointEnv(Environment):
         y = radius * np.sin(angles)
         goals = [np.array([x[i], y[i]]) for i in range(num_tasks)]
         tasks = [{'goal': goal} for goal in goals]
-        breakpoint = True
 
         # goals = np.random.uniform(-2, 2, size=(num_tasks, 2))
         # tasks = [{'goal': goal} for goal in goals]

@@ -129,6 +129,7 @@ class CLContextConditionedPolicy(nn.Module):
                 C is the combined size of observation, action, and reward.
 
         """
+        breakpoint = True
         params = self._context_encoder.forward(context)
         params = params.view(context.size(0), -1,
                              self._context_encoder.output_dim)

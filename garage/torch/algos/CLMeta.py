@@ -180,7 +180,12 @@ class CLMETA(MetaRLAlgorithm):
                              'test_env_sampler.n_tasks is None')
 
         worker_args = dict(deterministic=True, accum_context=True)
-        self._evaluator = MetaEvaluator(test_task_sampler=test_env_sampler,
+        self._train_evaluator = MetaEvaluator(test_tasks=env, 
+                                              worker_class=PEARLWorker, 
+                                              worker_args=worker_args, 
+                                              n_test_tasks=num_train_tasks,
+                                              prefix="MetaTrain")
+        self._test_evaluator = MetaEvaluator(test_task_sampler=test_env_sampler,
                                         worker_class=PEARLWorker,
                                         worker_args=worker_args,
                                         n_test_tasks=num_test_tasks)
@@ -311,15 +316,20 @@ class CLMETA(MetaRLAlgorithm):
             logger.log('Training...')
             # sample train tasks and optimize networks
             self._train_once()
+            logger.log("Contrastive Loss: {}".format(self.epoch_cont_loss/self._num_steps_per_epoch)) 
+        
             trainer.step_itr += 1
 
             logger.log('Evaluating...')
             # evaluate
             self._policy.reset_belief()
-            self._evaluator.evaluate(self)
+            self._train_evaluator.evaluate(self)
+            self._test_evaluator.evaluate(self)
+            # self._evaluator.evaluate(self)
 
     def _train_once(self):
         """Perform one iteration of training."""
+        self.epoch_cont_loss = 0
         for _ in range(self._num_steps_per_epoch):
             indices = np.random.choice(range(self._num_train_tasks),
                                        self._meta_batch_size)
@@ -378,7 +388,8 @@ class CLMETA(MetaRLAlgorithm):
             self._policy.infer_posterior(neg_context)
             neg_z[idx,:,:] = self._policy.z.detach()
         cont_loss = self._policy.compute_contrastive_loss(current_z, pos_z, neg_z)    
-        cont_loss.backward(retain_graph=True)    
+        cont_loss.backward(retain_graph=True)
+        self.epoch_cont_loss += cont_loss.item()
 
         zero_optim_grads(self.qf1_optimizer)
         zero_optim_grads(self.qf2_optimizer)
@@ -734,7 +745,7 @@ class CLMETA(MetaRLAlgorithm):
         action_dim = int(np.prod(env_spec.action_space.shape))
         if module == 'encoder':
             in_dim = obs_dim + action_dim + 1
-            out_dim = latent_dim * 2
+            out_dim = latent_dim#TODO, this needs to be updated whether we use probabilitstic or deterministic encoding
         elif module == 'vf':
             in_dim = obs_dim
             out_dim = latent_dim

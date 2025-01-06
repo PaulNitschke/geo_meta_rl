@@ -39,7 +39,8 @@ class MetaEvaluator:
 
     def __init__(self,
                  *,
-                 test_task_sampler,
+                 test_task_sampler=None,
+                 test_tasks=None,
                  n_exploration_eps=10,
                  n_test_tasks=None,
                  n_test_episodes=1,
@@ -48,6 +49,7 @@ class MetaEvaluator:
                  worker_class=DefaultWorker,
                  worker_args=None):
         self._test_task_sampler = test_task_sampler
+        self._test_tasks= test_tasks
         self._worker_class = worker_class
         if worker_args is None:
             self._worker_args = {}
@@ -76,7 +78,11 @@ class MetaEvaluator:
             test_episodes_per_task = self._n_test_episodes
         adapted_episodes = []
         logger.log('Sampling for adapation and meta-testing...')
-        env_updates = self._test_task_sampler.sample(self._n_test_tasks)
+        if self._test_task_sampler is not None:
+            env_updates = self._test_task_sampler.sample(self._n_test_tasks)
+        else:
+            env_updates = self._test_tasks
+
         if self._test_sampler is None:
             env = env_updates[0]()
             self._max_episode_length = env.spec.max_episode_length

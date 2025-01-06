@@ -40,19 +40,19 @@ from garage.envs import normalize, PointEnv
 @wrap_experiment
 def CL_point_env(ctxt=None,
                              seed=1,
-                             num_epochs=30,
-                             num_train_tasks=20,
+                             num_epochs=50,
+                             num_train_tasks=5,
                              num_test_tasks=20,
                              latent_size=2,
-                             encoder_hidden_size=16,
-                             net_size=64,
-                             n_negative_samples=5,
+                             encoder_hidden_size=128,
+                             net_size=256,
+                             n_negative_samples=12,
                              meta_batch_size=16,
                              num_steps_per_epoch=400,
-                             num_initial_steps=400,
+                             num_initial_steps=1200,
                              num_tasks_sample=5,
-                             num_steps_prior=75,
-                             num_extra_rl_steps_posterior=16,
+                             num_steps_prior=500,
+                             num_extra_rl_steps_posterior=400,
                              batch_size=256,
                              embedding_batch_size=64,
                              embedding_mini_batch_size=64,
@@ -127,7 +127,7 @@ def CL_point_env(ctxt=None,
                            n_workers=1,
                            worker_class=PEARLWorker)
 
-    pearl = CLMETA(
+    clmeta = CLMETA(
         env=env,
         policy_class=CLContextConditionedPolicy,
         encoder_class=MLPEncoder,
@@ -135,6 +135,8 @@ def CL_point_env(ctxt=None,
         qf=qf,
         vf=vf,
         sampler=sampler,
+        context_lr=3E-3,
+        use_information_bottleneck=False,
         num_train_tasks=num_train_tasks,
         num_test_tasks=num_test_tasks,
         latent_dim=latent_size,
@@ -155,9 +157,9 @@ def CL_point_env(ctxt=None,
 
     set_gpu_mode(use_gpu, gpu_id=0)
     if use_gpu:
-        pearl.to()
+        clmeta.to()
 
-    trainer.setup(algo=pearl, env=env[0]())
+    trainer.setup(algo=clmeta, env=env[0]())
 
     trainer.train(n_epochs=num_epochs, batch_size=batch_size)
 
