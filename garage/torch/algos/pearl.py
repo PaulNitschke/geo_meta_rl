@@ -360,7 +360,7 @@ class PEARL(MetaRLAlgorithm):
             kl_div = self._policy.compute_kl_div()
             kl_loss = self._kl_lambda * kl_div
             kl_loss.backward(retain_graph=True)
-
+        print("Kl loss: ", kl_loss.item())
         zero_optim_grads(self.qf1_optimizer)
         zero_optim_grads(self.qf2_optimizer)
 

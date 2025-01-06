@@ -380,15 +380,18 @@ class CLMETA(MetaRLAlgorithm):
         self._policy.infer_posterior(pos_context)
         pos_z = self._policy.z
 
-        neg_z = torch.zeros((num_tasks, self._n_negative_samples, self._latent_dim))
-        for idx, index_task in enumerate(indices):
+        zero_optim_grads(self.context_optimizer)
+        neg_z_list = []
+        for index_task in enumerate(indices):
             _current_neg_indeces_task = [i for i in range(self._num_train_tasks) if i != index_task]
             neg_task_indices=np.random.choice(_current_neg_indeces_task, self._n_negative_samples)
             neg_context = self._sample_context(neg_task_indices)
             self._policy.infer_posterior(neg_context)
-            neg_z[idx,:,:] = self._policy.z.detach()
+            neg_z_list.append(self._policy.z)
+        neg_z = torch.stack(neg_z_list, dim=0)
         cont_loss = self._policy.compute_contrastive_loss(current_z, pos_z, neg_z)    
         cont_loss.backward(retain_graph=True)
+        logger.log("Contrastive Loss: {}".format(cont_loss.item()))
         self.epoch_cont_loss += cont_loss.item()
 
         zero_optim_grads(self.qf1_optimizer)
@@ -745,7 +748,7 @@ class CLMETA(MetaRLAlgorithm):
         action_dim = int(np.prod(env_spec.action_space.shape))
         if module == 'encoder':
             in_dim = obs_dim + action_dim + 1
-            out_dim = latent_dim#TODO, this needs to be updated whether we use probabilitstic or deterministic encoding
+            out_dim = latent_dim*2#TODO, this needs to be updated whether we use probabilitstic or deterministic encoding
         elif module == 'vf':
             in_dim = obs_dim
             out_dim = latent_dim
