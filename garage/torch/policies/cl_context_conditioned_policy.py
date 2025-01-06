@@ -129,7 +129,6 @@ class CLContextConditionedPolicy(nn.Module):
                 C is the combined size of observation, action, and reward.
 
         """
-        breakpoint = True
         params = self._context_encoder.forward(context)
         params = params.view(context.size(0), -1,
                              self._context_encoder.output_dim)
@@ -237,7 +236,10 @@ class CLContextConditionedPolicy(nn.Module):
     #     kl_div_sum = torch.sum(torch.stack(kl_divs))
     #     return kl_div_sum
 
-    def compute_contrastive_loss(self, emb_current_traj, emb_positive_traj, emb_negative_traj):
+    def compute_contrastive_loss(self, 
+                                 emb_current_traj, 
+                                 emb_positive_traj, 
+                                 emb_negative_traj):
 
         '''
         Compute the contrastive loss between the current trajectory embedding and positive/negative trajectory embeddings.

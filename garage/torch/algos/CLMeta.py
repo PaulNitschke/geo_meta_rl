@@ -9,6 +9,7 @@ import akro
 from dowel import logger
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from garage import EnvSpec, InOutSpec, StepType, TimeStep
 from garage.experiment import MetaEvaluator
@@ -290,7 +291,7 @@ class CLMETA(MetaRLAlgorithm):
                     self._obtain_samples(trainer, epoch,
                                          self._num_initial_steps, np.inf)
                     self._is_resuming = False
-            breakpoint = True
+
             # obtain samples from random tasks
             for _ in range(self._num_tasks_sample):
                 idx = np.random.randint(self._num_train_tasks)
@@ -316,7 +317,6 @@ class CLMETA(MetaRLAlgorithm):
             logger.log('Training...')
             # sample train tasks and optimize networks
             self._train_once()
-            logger.log("Contrastive Loss: {}".format(self.epoch_cont_loss/self._num_steps_per_epoch)) 
         
             trainer.step_itr += 1
 
@@ -329,11 +329,77 @@ class CLMETA(MetaRLAlgorithm):
 
     def _train_once(self):
         """Perform one iteration of training."""
-        self.epoch_cont_loss = 0
+        N_STEPS = 50
         for _ in range(self._num_steps_per_epoch):
+            self.epoch_cont_loss = 0
             indices = np.random.choice(range(self._num_train_tasks),
                                        self._meta_batch_size)
-            self._optimize_policy(indices)
+            
+            #Train Embedding.
+            prev_cont_loss = torch.inf
+            idx_cont_loss = 0
+            cl_loss_converged=True
+            while not cl_loss_converged and idx_cont_loss<N_STEPS:
+                cont_loss=self._optimize_contrastive_loss(indices)
+                if torch.abs(cont_loss-prev_cont_loss)<1e-3:
+                    cl_loss_converged=True
+                    idx_cont_loss = 0
+                prev_cont_loss = cont_loss
+
+            self._optimize_contrastive_loss(indices, log_mean_task_embeddings=True)
+            logger.log("Training Encoder\n")
+            logger.log("\n\nMean Contrastive Loss (while training encoder with frozen policy): {}".format(self.epoch_cont_loss/N_STEPS)) 
+            self.epoch_cont_loss = 0
+
+            #Train Policy.
+            logger.log("Training Policy\n")
+            for _ in range(N_STEPS):
+                self._optimize_policy(indices)
+            logger.log("\n\nMean Contrastive Loss (while training policy with frozen encoder): {}".format(self.epoch_cont_loss/N_STEPS)) 
+
+
+    def _optimize_contrastive_loss(self, indices, 
+                                   step_optimizer=True,
+                                   log_mean_task_embeddings=False):
+        """Perform one iteration of training the embedding function via Contrastive Learning."""
+        context = self._sample_context(indices)
+        self._policy.infer_posterior(context)
+        self.current_z = F.normalize(self._policy.z, p=2, dim=1)
+        pos_context = self._sample_context(indices)
+        self._policy.infer_posterior(pos_context)
+        pos_z = F.normalize(self._policy.z, p=2, dim=1)
+
+        zero_optim_grads(self.context_optimizer)
+        neg_z_list = []
+        for _, index_task in enumerate(indices):
+            _current_neg_indeces_task = [i for i in range(self._num_train_tasks) if i != index_task]
+            neg_task_indices=np.random.choice(_current_neg_indeces_task, self._n_negative_samples)
+            neg_context = self._sample_context(neg_task_indices)
+            self._policy.infer_posterior(neg_context)
+            neg_z_list.append(F.normalize(self._policy.z, p=2, dim=1))
+        neg_z = torch.stack(neg_z_list, dim=0)
+        cont_loss = self._policy.compute_contrastive_loss(self.current_z, pos_z, neg_z)    
+        cont_loss.backward(retain_graph=True)
+        self.epoch_cont_loss += cont_loss.item()
+        if step_optimizer:
+            self.context_optimizer.step()
+        if log_mean_task_embeddings:
+            mean_task_embeddings = self._compute_mean_embedding(indices)
+            logger.log("Mean Task Embeddings (n_tasks x embedding_dim): {}".format(mean_task_embeddings))
+
+        return cont_loss
+
+    def _compute_mean_embedding(self, indices):
+        """Computes the mean embedding of each task from context. Returns tensor of shape (num_tasks, latent_dim). Mostly used for debugging and visualization"""
+        indices=torch.tensor(indices)
+        _mean_task_embeddings = torch.zeros(self._num_train_tasks, self._latent_dim)
+        sample_counts = torch.zeros(self._num_train_tasks, dtype=torch.float)
+        _mean_task_embeddings.index_add_(0, indices, self.current_z)
+        sample_counts.index_add_(0, indices, torch.ones_like(indices, dtype=torch.float))
+        mean_task_embeddings = (_mean_task_embeddings.T / sample_counts).T
+        pairwise_similarity = torch.mm(F.normalize(mean_task_embeddings, p=2, dim=1), F.normalize(mean_task_embeddings, p=2, dim=1).T)
+        logger.log("Pairwise Similarity Matrix: {}".format(pairwise_similarity))
+        return mean_task_embeddings
 
     def _optimize_policy(self, indices):
         """Perform algorithm optimizing.
@@ -345,7 +411,6 @@ class CLMETA(MetaRLAlgorithm):
         num_tasks = len(indices)
         context = self._sample_context(indices)
         # clear context and reset belief of policy
-        breakpoint = True
         self._policy.reset_belief(num_tasks=num_tasks)
 
         # data shape is (task, batch, feat)
@@ -374,25 +439,26 @@ class CLMETA(MetaRLAlgorithm):
         #     kl_loss = self._kl_lambda * kl_div
         #     kl_loss.backward(retain_graph=True)
 
-        # Contrastive Learning Loss
-        current_z = self._policy.z
-        pos_context = self._sample_context(indices)
-        self._policy.infer_posterior(pos_context)
-        pos_z = self._policy.z
+        # # Contrastive Learning Loss
+        # self._policy.infer_posterior(context)
+        # current_z = self._policy.z
+        # pos_context = self._sample_context(indices)
+        # self._policy.infer_posterior(pos_context)
+        # pos_z = self._policy.z
 
-        zero_optim_grads(self.context_optimizer)
-        neg_z_list = []
-        for index_task in enumerate(indices):
-            _current_neg_indeces_task = [i for i in range(self._num_train_tasks) if i != index_task]
-            neg_task_indices=np.random.choice(_current_neg_indeces_task, self._n_negative_samples)
-            neg_context = self._sample_context(neg_task_indices)
-            self._policy.infer_posterior(neg_context)
-            neg_z_list.append(self._policy.z)
-        neg_z = torch.stack(neg_z_list, dim=0)
-        cont_loss = self._policy.compute_contrastive_loss(current_z, pos_z, neg_z)    
-        cont_loss.backward(retain_graph=True)
-        logger.log("Contrastive Loss: {}".format(cont_loss.item()))
-        self.epoch_cont_loss += cont_loss.item()
+        # zero_optim_grads(self.context_optimizer)
+        # neg_z_list = []
+        # for index_task in range(indices):
+        #     _current_neg_indeces_task = [i for i in range(self._num_train_tasks) if i != index_task]
+        #     neg_task_indices=np.random.choice(_current_neg_indeces_task, self._n_negative_samples)
+        #     neg_context = self._sample_context(neg_task_indices)
+        #     self._policy.infer_posterior(neg_context)
+        #     neg_z_list.append(self._policy.z)
+        # neg_z = torch.stack(neg_z_list, dim=0)
+        # cont_loss = self._policy.compute_contrastive_loss(current_z, pos_z, neg_z)    
+        # cont_loss.backward(retain_graph=True)
+        # logger.log("Contrastive Loss: {}".format(cont_loss.item()))
+        # self.epoch_cont_loss += cont_loss.item()
 
         zero_optim_grads(self.qf1_optimizer)
         zero_optim_grads(self.qf2_optimizer)
@@ -408,7 +474,7 @@ class CLMETA(MetaRLAlgorithm):
 
         self.qf1_optimizer.step()
         self.qf2_optimizer.step()
-        self.context_optimizer.step()
+        # self.context_optimizer.step()
 
         # compute min Q on the new actions
         q1 = self._qf1(torch.cat([obs, new_actions], dim=1), task_z.detach())
@@ -439,6 +505,9 @@ class CLMETA(MetaRLAlgorithm):
         zero_optim_grads(self._policy_optimizer)
         policy_loss.backward()
         self._policy_optimizer.step()
+
+        # self._optimize_contrastive_loss(indices, step_optimizer=False)
+
 
     def _obtain_samples(self,
                         trainer,
@@ -748,7 +817,7 @@ class CLMETA(MetaRLAlgorithm):
         action_dim = int(np.prod(env_spec.action_space.shape))
         if module == 'encoder':
             in_dim = obs_dim + action_dim + 1
-            out_dim = latent_dim*2#TODO, this needs to be updated whether we use probabilitstic or deterministic encoding
+            out_dim = latent_dim#TODO, this needs to be updated whether we use probabilitstic or deterministic encoding
         elif module == 'vf':
             in_dim = obs_dim
             out_dim = latent_dim
