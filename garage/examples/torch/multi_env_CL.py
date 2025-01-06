@@ -40,7 +40,7 @@ from garage.envs import normalize, PointEnv
 @wrap_experiment
 def CL_point_env(ctxt=None,
                              seed=1,
-                             num_epochs=3,
+                             num_epochs=20,
                              num_train_tasks=2,
                              num_test_tasks=20,
                              latent_size=5,

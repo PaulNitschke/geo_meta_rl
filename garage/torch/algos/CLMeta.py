@@ -127,6 +127,8 @@ class CLMETA(MetaRLAlgorithm):
             num_tasks_sample=100,
             num_steps_prior=100,
             num_steps_posterior=0,
+            num_CL_steps_per_policy=150,
+            num_policy_steps_per_CL=50,
             num_extra_rl_steps_posterior=100,
             batch_size=1024,
             embedding_batch_size=1024,
@@ -158,6 +160,8 @@ class CLMETA(MetaRLAlgorithm):
         self._num_tasks_sample = num_tasks_sample
         self._num_steps_prior = num_steps_prior
         self._num_steps_posterior = num_steps_posterior
+        self.num_CL_steps_per_policy = num_CL_steps_per_policy
+        self.num_policy_steps_per_CL = num_policy_steps_per_CL
         self._num_extra_rl_steps_posterior = num_extra_rl_steps_posterior
         self._batch_size = batch_size
         self._embedding_batch_size = embedding_batch_size
@@ -329,7 +333,6 @@ class CLMETA(MetaRLAlgorithm):
 
     def _train_once(self):
         """Perform one iteration of training."""
-        N_STEPS = 50
         for _ in range(self._num_steps_per_epoch):
             self.epoch_cont_loss = 0
             indices = np.random.choice(range(self._num_train_tasks),
@@ -339,23 +342,24 @@ class CLMETA(MetaRLAlgorithm):
             prev_cont_loss = torch.inf
             idx_cont_loss = 0
             cl_loss_converged=True
-            while not cl_loss_converged and idx_cont_loss<N_STEPS:
+            while not cl_loss_converged and idx_cont_loss<self.num_CL_steps_per_policy:
                 cont_loss=self._optimize_contrastive_loss(indices)
                 if torch.abs(cont_loss-prev_cont_loss)<1e-3:
                     cl_loss_converged=True
                     idx_cont_loss = 0
+                if idx_cont_loss==self.num_CL_steps_per_policy:
+                    logger.log("Contrastive Loss did not converge in {} steps".format(self.num_CL_steps_per_policy))
                 prev_cont_loss = cont_loss
 
             self._optimize_contrastive_loss(indices, log_mean_task_embeddings=True)
             logger.log("Training Encoder\n")
-            logger.log("\n\nMean Contrastive Loss (while training encoder with frozen policy): {}".format(self.epoch_cont_loss/N_STEPS)) 
+            logger.log("\n\nMean Contrastive Loss (while training encoder with frozen policy): {}".format(self.epoch_cont_loss/idx_cont_loss)) 
             self.epoch_cont_loss = 0
 
             #Train Policy.
             logger.log("Training Policy\n")
-            for _ in range(N_STEPS):
+            for _ in range(self.num_policy_steps_per_CL):
                 self._optimize_policy(indices)
-            logger.log("\n\nMean Contrastive Loss (while training policy with frozen encoder): {}".format(self.epoch_cont_loss/N_STEPS)) 
 
 
     def _optimize_contrastive_loss(self, indices, 
@@ -650,49 +654,6 @@ class CLMETA(MetaRLAlgorithm):
             final_context = final_context.unsqueeze(0)
 
         return final_context
-
-    # def _sample_negative_context(self, indices): #TODO, maybe we need this
-    #     """Sample batch of negative context from a list of tasks.
-
-    #     Args:
-    #         indices (list): List of list of task indices to sample from.
-
-    #     Returns:
-    #         torch.Tensor: Context data, with shape :math:`(X, N, C)`. X is the
-    #             number of tasks. N is batch size. C is the combined size of
-    #             (observation, action, reward, and next observation) times number of negative samples if next
-    #             observation is used in context. Otherwise, C is the combined
-    #             size of observation, action, and reward.
-
-    #     """
-    #     # make method work given a single task index
-    #     if not hasattr(indices, '__iter__'):
-    #         indices = [indices]
-
-    #     initialized = False
-    #     for idx_task in indices:
-    #         for idx_negative_task in idx_task:
-    #             batch = self._context_replay_buffers[idx_negative_task].sample_transitions(
-    #                 self._embedding_batch_size)
-    #             o = batch['observations']
-    #             a = batch['actions']
-    #             r = batch['rewards']
-    #             context = np.hstack((np.hstack((o, a)), r))
-    #             if self._use_next_obs_in_context:
-    #                 context = np.hstack((context, batch['next_observations']))
-
-    #             if not initialized:
-    #                 final_context = context[np.newaxis]
-    #                 initialized = True
-    #             else:
-    #                 final_context = np.vstack((final_context, context[np.newaxis]))
-
-    #     final_context = np_to_torch(final_context)
-
-    #     if len(indices) == 1:
-    #         final_context = final_context.unsqueeze(0)
-
-    #     return final_context
 
     def _update_target_network(self):
         """Update parameters in the target vf network."""

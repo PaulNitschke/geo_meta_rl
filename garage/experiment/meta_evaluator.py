@@ -14,6 +14,7 @@ class MetaEvaluator:
         test_task_sampler (TaskSampler): Sampler for test
             tasks. To demonstrate the effectiveness of a meta-learning method,
             these should be different from the training tasks.
+        test_tasks (list[Type[gym.Env]]): List of test tasks. Can be inserted instead of test_task_sampler.
         n_test_tasks (int or None): Number of test tasks to sample each time
             evaluation is performed. Note that tasks are sampled "without
             replacement". If None, is set to `test_task_sampler.n_tasks`.
@@ -94,6 +95,7 @@ class MetaEvaluator:
                               worker_args=self._worker_args),
                 agents=algo.get_exploration_policy(),
                 envs=env)
+        breakpoint=True
         for env_up in env_updates:
             policy = algo.get_exploration_policy()
             eps = EpisodeBatch.concatenate(*[
@@ -121,3 +123,5 @@ class MetaEvaluator:
                 getattr(algo, 'discount', 1.0),
                 name_map=name_map)
         self._eval_itr += 1
+
+        return adapted_episodes
