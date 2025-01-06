@@ -203,7 +203,7 @@ class CLMETA(MetaRLAlgorithm):
                                         output_dim=encoder_out_dim,
                                         hidden_sizes=encoder_hidden_sizes)
 
-        self._policy = policy_class( #TODO, update policy class with encoder
+        self._policy = policy_class(
             latent_dim=latent_dim,
             context_encoder=context_encoder,
             policy=inner_policy,
@@ -334,22 +334,23 @@ class CLMETA(MetaRLAlgorithm):
     def _train_once(self):
         """Perform one iteration of training."""
         for _ in range(self._num_steps_per_epoch):
-            self.epoch_cont_loss = 0
             indices = np.random.choice(range(self._num_train_tasks),
                                        self._meta_batch_size)
             
             #Train Embedding.
+            self.epoch_cont_loss = 0
             prev_cont_loss = torch.inf
             idx_cont_loss = 0
-            cl_loss_converged=True
+            cl_loss_converged=False
             while not cl_loss_converged and idx_cont_loss<self.num_CL_steps_per_policy:
                 cont_loss=self._optimize_contrastive_loss(indices)
-                if torch.abs(cont_loss-prev_cont_loss)<1e-3:
+                if torch.abs(cont_loss-prev_cont_loss)<1e-3 and idx_cont_loss>5: #at least a few steps to check convergence
                     cl_loss_converged=True
-                    idx_cont_loss = 0
+                    logger.log("Contrastive Loss converged in {} steps".format(idx_cont_loss))
                 if idx_cont_loss==self.num_CL_steps_per_policy:
                     logger.log("Contrastive Loss did not converge in {} steps".format(self.num_CL_steps_per_policy))
                 prev_cont_loss = cont_loss
+                idx_cont_loss += 1
 
             self._optimize_contrastive_loss(indices, log_mean_task_embeddings=True)
             logger.log("Training Encoder\n")
@@ -389,7 +390,7 @@ class CLMETA(MetaRLAlgorithm):
             self.context_optimizer.step()
         if log_mean_task_embeddings:
             mean_task_embeddings = self._compute_mean_embedding(indices)
-            logger.log("Mean Task Embeddings (n_tasks x embedding_dim): {}".format(mean_task_embeddings))
+            logger.log("Mean Task Embeddings (n_tasks x embedding_dim): \n{}".format(mean_task_embeddings))
 
         return cont_loss
 
@@ -402,7 +403,7 @@ class CLMETA(MetaRLAlgorithm):
         sample_counts.index_add_(0, indices, torch.ones_like(indices, dtype=torch.float))
         mean_task_embeddings = (_mean_task_embeddings.T / sample_counts).T
         pairwise_similarity = torch.mm(F.normalize(mean_task_embeddings, p=2, dim=1), F.normalize(mean_task_embeddings, p=2, dim=1).T)
-        logger.log("Pairwise Similarity Matrix: {}".format(pairwise_similarity))
+        logger.log("Pairwise Similarity Matrix: \n{}".format(pairwise_similarity))
         return mean_task_embeddings
 
     def _optimize_policy(self, indices):
@@ -436,34 +437,6 @@ class CLMETA(MetaRLAlgorithm):
         with torch.no_grad():
             target_v_values = self.target_vf(next_obs, task_z)
 
-        # # KL constraint on z if probabilistic #TODO, make here CL loss
-        # zero_optim_grads(self.context_optimizer)
-        # if self._use_information_bottleneck:
-        #     kl_div = self._policy.compute_kl_div()
-        #     kl_loss = self._kl_lambda * kl_div
-        #     kl_loss.backward(retain_graph=True)
-
-        # # Contrastive Learning Loss
-        # self._policy.infer_posterior(context)
-        # current_z = self._policy.z
-        # pos_context = self._sample_context(indices)
-        # self._policy.infer_posterior(pos_context)
-        # pos_z = self._policy.z
-
-        # zero_optim_grads(self.context_optimizer)
-        # neg_z_list = []
-        # for index_task in range(indices):
-        #     _current_neg_indeces_task = [i for i in range(self._num_train_tasks) if i != index_task]
-        #     neg_task_indices=np.random.choice(_current_neg_indeces_task, self._n_negative_samples)
-        #     neg_context = self._sample_context(neg_task_indices)
-        #     self._policy.infer_posterior(neg_context)
-        #     neg_z_list.append(self._policy.z)
-        # neg_z = torch.stack(neg_z_list, dim=0)
-        # cont_loss = self._policy.compute_contrastive_loss(current_z, pos_z, neg_z)    
-        # cont_loss.backward(retain_graph=True)
-        # logger.log("Contrastive Loss: {}".format(cont_loss.item()))
-        # self.epoch_cont_loss += cont_loss.item()
-
         zero_optim_grads(self.qf1_optimizer)
         zero_optim_grads(self.qf2_optimizer)
 
@@ -478,7 +451,6 @@ class CLMETA(MetaRLAlgorithm):
 
         self.qf1_optimizer.step()
         self.qf2_optimizer.step()
-        # self.context_optimizer.step()
 
         # compute min Q on the new actions
         q1 = self._qf1(torch.cat([obs, new_actions], dim=1), task_z.detach())
