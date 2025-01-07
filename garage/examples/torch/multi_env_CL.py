@@ -40,7 +40,7 @@ from garage.envs import normalize, PointEnv
 @wrap_experiment
 def CL_point_env(ctxt=None,
                              seed=1,
-                             num_epochs=20,
+                             num_epochs=50,
                              num_train_tasks=2,
                              num_test_tasks=20,
                              latent_size=5,
@@ -49,20 +49,25 @@ def CL_point_env(ctxt=None,
                              n_negative_samples=12,
                              meta_batch_size=32,
                              num_steps_per_epoch=15,
-                             num_initial_steps=1200,
                              num_tasks_sample=5,
                              num_CL_steps_per_policy=150,
-                             num_policy_steps_per_CL=25,
+                             num_policy_steps_per_CL=50,
+                             num_initial_steps=1200,
                              num_steps_prior=500,
                              num_extra_rl_steps_posterior=400,
-                             context_lr=3e-3,
+                             use_information_bottleneck=True,
+                             context_lr=1e-3,
+                             policy_lr=1e-3,
+                             qf_lr=1e-4,
+                             vf_lr=1e-4,    
                              batch_size=256,
                              embedding_batch_size=64,
                              embedding_mini_batch_size=64,
                              reward_scale=10.,
+                             replay_buffer_size=100_000,
                              max_episode_length=200,
                              use_gpu=False):
-    """Train PEARL with ML1 environments.
+    """Train Contrastive Learning Meta-RL algorithm with Point environments.
 
     Args:
         ctxt (garage.experiment.ExperimentContext): The experiment
@@ -117,9 +122,9 @@ def CL_point_env(ctxt=None,
     qf = ContinuousMLPQFunction(env_spec=augmented_env,
                                 hidden_sizes=[net_size, net_size, net_size])
 
-    vf_env = CLMETA.get_env_spec(env[0](), latent_size, 'vf')
+    vf_env = CLMETA.get_env_spec(env[0](), latent_size, 'vf', use_information_bottleneck=use_information_bottleneck)
     vf = ContinuousMLPQFunction(env_spec=vf_env,
-                                hidden_sizes=[net_size, net_size, net_size])
+                                hidden_sizes=[net_size, net_size, net_size]) #TODO changes these to 2 instead of 3
 
     inner_policy = TanhGaussianMLPPolicy(
         env_spec=augmented_env, hidden_sizes=[net_size, net_size, net_size])
@@ -139,7 +144,10 @@ def CL_point_env(ctxt=None,
         vf=vf,
         sampler=sampler,
         context_lr=context_lr,
-        use_information_bottleneck=False,
+        policy_lr=policy_lr,
+        qf_lr=qf_lr,
+        vf_lr=vf_lr,
+        use_information_bottleneck=use_information_bottleneck,
         num_train_tasks=num_train_tasks,
         num_test_tasks=num_test_tasks,
         latent_dim=latent_size,
@@ -157,6 +165,7 @@ def CL_point_env(ctxt=None,
         batch_size=batch_size,
         embedding_batch_size=embedding_batch_size,
         embedding_mini_batch_size=embedding_mini_batch_size,
+        replay_buffer_size=replay_buffer_size,
         reward_scale=reward_scale,
     )
 

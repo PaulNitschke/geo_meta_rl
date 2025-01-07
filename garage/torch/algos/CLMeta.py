@@ -6,7 +6,7 @@ Code is adapted from https://github.com/katerakelly/oyster.
 import copy
 
 import akro
-from dowel import logger
+from dowel import logger, tabular
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -196,7 +196,7 @@ class CLMETA(MetaRLAlgorithm):
                                         n_test_tasks=num_test_tasks)
 
         encoder_spec = self.get_env_spec(self._single_env, latent_dim,
-                                         'encoder')
+                                         'encoder', use_information_bottleneck=use_information_bottleneck)
         encoder_in_dim = int(np.prod(encoder_spec.input_space.shape))
         encoder_out_dim = int(np.prod(encoder_spec.output_space.shape))
         context_encoder = encoder_class(input_dim=encoder_in_dim,
@@ -298,7 +298,7 @@ class CLMETA(MetaRLAlgorithm):
 
             # obtain samples from random tasks
             for _ in range(self._num_tasks_sample):
-                idx = np.random.randint(self._num_train_tasks)
+                idx = np.random.randint(self._num_train_tasks) #TODO, changed this to deterministically sample all tasks instead of randomly if there are only very few tasks.
                 self._task_idx = idx
                 self._context_replay_buffers[idx].clear()
                 # obtain samples with z ~ prior
@@ -324,12 +324,11 @@ class CLMETA(MetaRLAlgorithm):
         
             trainer.step_itr += 1
 
-            logger.log('Evaluating...')
             # evaluate
+            logger.log('Evaluating...')
             self._policy.reset_belief()
             self._train_evaluator.evaluate(self)
             self._test_evaluator.evaluate(self)
-            # self._evaluator.evaluate(self)
 
     def _train_once(self):
         """Perform one iteration of training."""
@@ -338,24 +337,25 @@ class CLMETA(MetaRLAlgorithm):
                                        self._meta_batch_size)
             
             #Train Embedding.
-            self.epoch_cont_loss = 0
-            prev_cont_loss = torch.inf
-            idx_cont_loss = 0
-            cl_loss_converged=False
-            while not cl_loss_converged and idx_cont_loss<self.num_CL_steps_per_policy:
-                cont_loss=self._optimize_contrastive_loss(indices)
-                if torch.abs(cont_loss-prev_cont_loss)<1e-3 and idx_cont_loss>5: #at least a few steps to check convergence
-                    cl_loss_converged=True
-                    logger.log("Contrastive Loss converged in {} steps".format(idx_cont_loss))
-                if idx_cont_loss==self.num_CL_steps_per_policy:
-                    logger.log("Contrastive Loss did not converge in {} steps".format(self.num_CL_steps_per_policy))
-                prev_cont_loss = cont_loss
-                idx_cont_loss += 1
+            if self._num_train_tasks>1:
+                self.epoch_cont_loss = 0
+                prev_cont_loss = torch.inf
+                idx_cont_loss = 0
+                cl_loss_converged=False
+                while not cl_loss_converged and idx_cont_loss<self.num_CL_steps_per_policy:
+                    cont_loss=self._optimize_contrastive_loss(indices)
+                    if torch.abs(cont_loss-prev_cont_loss)<1e-3 and idx_cont_loss>5: #at least a few steps to check convergence
+                        cl_loss_converged=True
+                        logger.log("Contrastive Loss converged in {} steps".format(idx_cont_loss))
+                    if idx_cont_loss==self.num_CL_steps_per_policy:
+                        logger.log("Contrastive Loss did not converge in {} steps".format(self.num_CL_steps_per_policy))
+                    prev_cont_loss = cont_loss
+                    idx_cont_loss += 1
 
-            self._optimize_contrastive_loss(indices, log_mean_task_embeddings=True)
-            logger.log("Training Encoder\n")
-            logger.log("\n\nMean Contrastive Loss (while training encoder with frozen policy): {}".format(self.epoch_cont_loss/idx_cont_loss)) 
-            self.epoch_cont_loss = 0
+                self._optimize_contrastive_loss(indices, log_mean_task_embeddings=True)
+                logger.log("Training Encoder\n")
+                logger.log("\n\nMean Contrastive Loss (while training encoder with frozen policy): {}".format(self.epoch_cont_loss/idx_cont_loss)) 
+                self.epoch_cont_loss = 0
 
             #Train Policy.
             logger.log("Training Policy\n")
@@ -367,6 +367,8 @@ class CLMETA(MetaRLAlgorithm):
                                    step_optimizer=True,
                                    log_mean_task_embeddings=False):
         """Perform one iteration of training the embedding function via Contrastive Learning."""
+
+
         context = self._sample_context(indices)
         self._policy.infer_posterior(context)
         self.current_z = F.normalize(self._policy.z, p=2, dim=1)
@@ -476,11 +478,24 @@ class CLMETA(MetaRLAlgorithm):
             (pre_tanh_value**2).sum(dim=1).mean())
         policy_reg_loss = (mean_reg_loss + std_reg_loss +
                            pre_activation_reg_loss)
-        policy_loss = policy_loss + policy_reg_loss
+        policy_loss = policy_loss + 100*policy_reg_loss #TODO, hardcoded weight for policy regularization
 
         zero_optim_grads(self._policy_optimizer)
         policy_loss.backward()
         self._policy_optimizer.step()
+
+        tabular.record("QF Loss", qf_loss.item())
+        tabular.record("VF Loss", vf_loss.item())
+        tabular.record("Policy Loss", policy_loss.item())
+        tabular.record("Mean Reg Loss", mean_reg_loss.item())
+        tabular.record("Std Reg Loss", std_reg_loss.item())
+        tabular.record("Pre-Activation Reg Loss", pre_activation_reg_loss.item())
+        logger.log(tabular)
+        # logger.log('QF Loss: {:.3f} | VF Loss: {:.3f} | Policy Loss: {:.3f}'.format(qf_loss.item(), vf_loss.item(), policy_loss.item()))
+        # logger.log(f"Policy Loss: {policy_loss.item()} | "
+        #    f"Mean Reg Loss: {mean_reg_loss.item()} | "
+        #    f"Std Reg Loss: {std_reg_loss.item()} | "
+        #    f"Pre-Activation Reg Loss: {pre_activation_reg_loss.item()}")
 
         # self._optimize_contrastive_loss(indices, step_optimizer=False)
 
@@ -734,7 +749,7 @@ class CLMETA(MetaRLAlgorithm):
         return EnvSpec(aug_obs, aug_act)
 
     @classmethod
-    def get_env_spec(cls, env_spec, latent_dim, module):
+    def get_env_spec(cls, env_spec, latent_dim, module, use_information_bottleneck):
         """Get environment specs of encoder with latent dimension.
 
         Args:
@@ -750,7 +765,7 @@ class CLMETA(MetaRLAlgorithm):
         action_dim = int(np.prod(env_spec.action_space.shape))
         if module == 'encoder':
             in_dim = obs_dim + action_dim + 1
-            out_dim = latent_dim#TODO, this needs to be updated whether we use probabilitstic or deterministic encoding
+            out_dim = latent_dim*2 if use_information_bottleneck else latent_dim
         elif module == 'vf':
             in_dim = obs_dim
             out_dim = latent_dim
