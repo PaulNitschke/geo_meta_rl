@@ -48,7 +48,8 @@ class MetaEvaluator:
                  prefix='MetaTest',
                  test_task_names=None,
                  worker_class=DefaultWorker,
-                 worker_args=None):
+                 worker_args=None,
+                 return_task_embeddings=False):
         self._test_task_sampler = test_task_sampler
         self._test_tasks= test_tasks
         self._worker_class = worker_class
@@ -66,6 +67,7 @@ class MetaEvaluator:
         self._test_task_names = test_task_names
         self._test_sampler = None
         self._max_episode_length = None
+        self._return_task_embeddings = return_task_embeddings
 
     def evaluate(self, algo, test_episodes_per_task=None):
         """Evaluate the Meta-RL algorithm on the test tasks.
@@ -78,6 +80,8 @@ class MetaEvaluator:
         if test_episodes_per_task is None:
             test_episodes_per_task = self._n_test_episodes
         adapted_episodes = []
+        if self._return_task_embeddings:
+            task_embeddings = []
         logger.log('Sampling for adapation and meta-testing...')
         if self._test_task_sampler is not None:
             env_updates = self._test_task_sampler.sample(self._n_test_tasks)
@@ -104,6 +108,9 @@ class MetaEvaluator:
                 for _ in range(self._n_exploration_eps)
             ])
             adapted_policy = algo.adapt_policy(policy, eps)
+            if self._return_task_embeddings:
+                task_embedding = algo.policy.z
+                task_embeddings.append(task_embedding)
             adapted_eps = self._test_sampler.obtain_samples(
                 self._eval_itr,
                 test_episodes_per_task * self._max_episode_length,
@@ -123,5 +130,7 @@ class MetaEvaluator:
                 getattr(algo, 'discount', 1.0),
                 name_map=name_map)
         self._eval_itr += 1
-
-        return adapted_episodes
+        if self._return_task_embeddings:
+            return adapted_episodes, task_embeddings
+        else:
+            return adapted_episodes
