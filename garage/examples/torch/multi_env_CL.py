@@ -221,9 +221,9 @@ from garage.envs import normalize, PointEnv
 # @click.option('--max_episode_length', default=200)
 @wrap_experiment
 def CL_point_env(ctxt=None,
-                             seed=2,
-                             num_epochs=5,
-                             num_train_tasks=2,
+                             seed=1,
+                             num_epochs=3,
+                             num_train_tasks=4,
                              num_test_tasks=20,
                              latent_size=5,
                              encoder_hidden_size=256,

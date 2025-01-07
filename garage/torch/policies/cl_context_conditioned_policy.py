@@ -87,9 +87,11 @@ class CLContextConditionedPolicy(nn.Module):
                     torch.unbind(self.z_means), torch.unbind(self.z_vars))
             ]
             z = [d.rsample() for d in posteriors]
-            self.z = torch.stack(z)
+            self.z = F.normalize(torch.stack(z), p=2, dim=1)
         else:
-            self.z = self.z_means #TODO, how about we dont sample from a normal distributution here but rather a point on the unit circle? Then we could show that uncertainty increases the further we stray away from 
+            # self.z = self.z_means 
+            self.z = F.normalize(self.z_means, p=2, dim=1)
+            #TODO, how about we dont sample from a normal distributution here but rather a point on the unit circle? Then we could show that uncertainty increases the further we stray away from 
 
     def update_context(self, timestep):
         """Append single transition to the current context.

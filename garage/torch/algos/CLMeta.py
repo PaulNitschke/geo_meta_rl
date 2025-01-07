@@ -19,7 +19,7 @@ from garage.sampler import DefaultWorker
 from garage.torch import global_device
 from garage.torch._functions import np_to_torch, zero_optim_grads
 from garage.torch.embeddings import MLPEncoder
-from garage.torch.policies import ContextConditionedPolicy
+from garage.torch.policies import CLContextConditionedPolicy
 
 
 class CLMETA(MetaRLAlgorithm):
@@ -107,7 +107,7 @@ class CLMETA(MetaRLAlgorithm):
             encoder_hidden_sizes,
             test_env_sampler,
             n_negative_samples,
-            policy_class=ContextConditionedPolicy,
+            policy_class=CLContextConditionedPolicy,
             encoder_class=MLPEncoder,
             policy_lr=3E-4,
             qf_lr=3E-4,
@@ -199,7 +199,7 @@ class CLMETA(MetaRLAlgorithm):
                                         output_dim=encoder_out_dim,
                                         hidden_sizes=encoder_hidden_sizes)
 
-        self._policy = policy_class( #TODO, update policy class with encoder
+        self._policy = policy_class(
             latent_dim=latent_dim,
             context_encoder=context_encoder,
             policy=inner_policy,
@@ -314,8 +314,24 @@ class CLMETA(MetaRLAlgorithm):
                                          self._update_post_train,
                                          add_to_enc_buffer=False)
 
+            if epoch==0:
+                logger.log('Pre-Training Encoder...')
+                self.epoch_cont_loss=0
+                indices = np.random.choice(range(self._num_train_tasks),
+                            self._meta_batch_size)
+                cl_loss_converged=False
+                prev_cont_loss = np.inf
+                idx_cont_loss = 0
+                while not cl_loss_converged and idx_cont_loss < 1000:
+                    cont_loss=self._optimize_contrastive_loss(indices)
+                    if torch.abs(cont_loss-prev_cont_loss)<1e-3:
+                        cl_loss_converged=True
+                    prev_cont_loss = cont_loss
+                    idx_cont_loss += 1
+                logger.log('Pre-Training Encoder Done...')
+                self._optimize_contrastive_loss(indices, log_mean_task_embeddings=True)
+
             logger.log('Training...')
-            # sample train tasks and optimize networks
             self._train_once()
         
             trainer.step_itr += 1
@@ -338,13 +354,14 @@ class CLMETA(MetaRLAlgorithm):
             #Train Embedding.
             prev_cont_loss = torch.inf
             idx_cont_loss = 0
-            cl_loss_converged=True
-            while not cl_loss_converged and idx_cont_loss<N_STEPS:
+            cl_loss_converged=False
+            while not cl_loss_converged and idx_cont_loss<200:
                 cont_loss=self._optimize_contrastive_loss(indices)
                 if torch.abs(cont_loss-prev_cont_loss)<1e-3:
                     cl_loss_converged=True
                     idx_cont_loss = 0
                 prev_cont_loss = cont_loss
+                idx_cont_loss += 1
 
             self._optimize_contrastive_loss(indices, log_mean_task_embeddings=True)
             logger.log("Training Encoder\n")
@@ -354,7 +371,7 @@ class CLMETA(MetaRLAlgorithm):
             #Train Policy.
             for _ in range(N_STEPS):
                 self._optimize_policy(indices)
-            self._optimize_policy(indices, log_diagnostics=True)
+            self._optimize_policy(indices, log_diagnostics=True) #TODO, change back to true
             logger.log(tabular)
 
     def _optimize_contrastive_loss(self, indices, 
@@ -363,10 +380,12 @@ class CLMETA(MetaRLAlgorithm):
         """Perform one iteration of training the embedding function via Contrastive Learning."""
         context = self._sample_context(indices)
         self._policy.infer_posterior(context)
-        self.current_z = F.normalize(self._policy.z, p=2, dim=1)
+        # self.current_z = F.normalize(self._policy.z, p=2, dim=1)
+        self.current_z = self._policy.z
         pos_context = self._sample_context(indices)
         self._policy.infer_posterior(pos_context)
-        pos_z = F.normalize(self._policy.z, p=2, dim=1)
+        # pos_z = F.normalize(self._policy.z, p=2, dim=1)
+        pos_z = self._policy.z
 
         zero_optim_grads(self.context_optimizer)
         neg_z_list = []
@@ -375,7 +394,8 @@ class CLMETA(MetaRLAlgorithm):
             neg_task_indices=np.random.choice(_current_neg_indeces_task, self._n_negative_samples)
             neg_context = self._sample_context(neg_task_indices)
             self._policy.infer_posterior(neg_context)
-            neg_z_list.append(F.normalize(self._policy.z, p=2, dim=1))
+            neg_z_list.append(self._policy.z)
+            # neg_z_list.append(F.normalize(self._policy.z, p=2, dim=1))
         neg_z = torch.stack(neg_z_list, dim=0)
         cont_loss = self._policy.compute_contrastive_loss(self.current_z, pos_z, neg_z)    
         cont_loss.backward(retain_graph=True)
@@ -398,9 +418,18 @@ class CLMETA(MetaRLAlgorithm):
         _mean_task_embeddings.index_add_(0, indices, self.current_z)
         sample_counts.index_add_(0, indices, torch.ones_like(indices, dtype=torch.float))
         mean_task_embeddings = (_mean_task_embeddings.T / sample_counts).T
-        pairwise_similarity = torch.mm(F.normalize(mean_task_embeddings, p=2, dim=1), F.normalize(mean_task_embeddings, p=2, dim=1).T)
-        logger.log("Pairwise Similarity Matrix: {}".format(pairwise_similarity))
+        self.pairwise_cosine_similarity = torch.mm(F.normalize(mean_task_embeddings, p=2, dim=1), F.normalize(mean_task_embeddings, p=2, dim=1).T)
+        logger.log("Pairwise Similarity Matrix: {}".format(self.pairwise_cosine_similarity))
         return mean_task_embeddings
+
+    def _did_if_cl_loss_converged(self, indices):
+        """Check if the contrastive loss has converged. This is true if the embedding vectors of different tasks are diagnoal, e.g. their cosine similarity is -1."""
+        self._compute_mean_embedding(self, indices)
+        diagonal_mask = torch.eye(self.pairwise_cosine_similarity.size(0), dtype=torch.bool)
+        off_diagonal_elements = self.pairwise_cosine_similarity[~diagonal_mask]
+        cl_loss_converged = torch.allclose(off_diagonal_elements, torch.full_like(off_diagonal_elements, -1), atol=1e-3)
+        
+        return cl_loss_converged
 
     def _optimize_policy(self, indices, log_diagnostics=False):
         """Perform algorithm optimizing.
@@ -672,6 +701,7 @@ class CLMETA(MetaRLAlgorithm):
                 meta-RL adaptation.
 
         """
+        self._policy.reset_belief() #TODO, added this myself because the policy is not reset in the original code
         return self._policy
 
     def adapt_policy(self, exploration_policy, exploration_episodes):

@@ -1,6 +1,7 @@
 """Evaluator which tests Meta-RL algorithms on test environments."""
 
 from dowel import logger, tabular
+import torch
 
 from garage import EpisodeBatch, log_multitask_performance
 from garage.experiment.deterministic import get_seed
