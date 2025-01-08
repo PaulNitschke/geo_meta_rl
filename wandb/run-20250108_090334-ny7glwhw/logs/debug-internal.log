@@ -1,0 +1,16 @@
+{"time":"2025-01-08T09:03:34.86314+01:00","level":"INFO","msg":"using version","core version":"0.19.1"}
+{"time":"2025-01-08T09:03:34.863182+01:00","level":"INFO","msg":"created symlink","path":"/Users/paulnitschke/Desktop/projects/geo_meta_rl/wandb/run-20250108_090334-ny7glwhw/logs/debug-core.log"}
+{"time":"2025-01-08T09:03:34.989503+01:00","level":"INFO","msg":"created new stream","id":"ny7glwhw"}
+{"time":"2025-01-08T09:03:34.989843+01:00","level":"INFO","msg":"stream: started","id":"ny7glwhw"}
+{"time":"2025-01-08T09:03:34.989846+01:00","level":"INFO","msg":"handler: started","stream_id":"ny7glwhw"}
+{"time":"2025-01-08T09:03:34.989961+01:00","level":"INFO","msg":"writer: Do: started","stream_id":"ny7glwhw"}
+{"time":"2025-01-08T09:03:34.989988+01:00","level":"INFO","msg":"sender: started","stream_id":"ny7glwhw"}
+{"time":"2025-01-08T09:03:35.443222+01:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-01-08T09:03:49.592343+01:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-01-08T09:03:49.594289+01:00","level":"INFO","msg":"stream: closing","id":"ny7glwhw"}
+{"time":"2025-01-08T09:03:49.605696+01:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-01-08T09:03:50.242682+01:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-01-08T09:03:50.516682+01:00","level":"INFO","msg":"handler: closed","stream_id":"ny7glwhw"}
+{"time":"2025-01-08T09:03:50.517261+01:00","level":"INFO","msg":"writer: Close: closed","stream_id":"ny7glwhw"}
+{"time":"2025-01-08T09:03:50.517603+01:00","level":"INFO","msg":"sender: closed","stream_id":"ny7glwhw"}
+{"time":"2025-01-08T09:03:50.519708+01:00","level":"INFO","msg":"stream: closed","id":"ny7glwhw"}

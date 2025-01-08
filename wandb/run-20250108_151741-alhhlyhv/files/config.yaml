@@ -1,0 +1,70 @@
+_wandb:
+    value:
+        cli_version: 0.19.1
+        m: []
+        python_version: 3.9.21
+        t:
+            "1":
+                - 1
+                - 2
+                - 3
+                - 30
+                - 55
+            "2":
+                - 1
+                - 2
+                - 3
+                - 30
+                - 55
+            "3":
+                - 13
+                - 16
+                - 23
+                - 55
+                - 62
+            "4": 3.9.21
+            "5": 0.19.1
+            "8":
+                - 5
+            "12": 0.19.1
+            "13": darwin-x86_64
+batch_size:
+    value: 256
+embedding_batch_size:
+    value: 64
+embedding_mini_batch_size:
+    value: 64
+encoder_hidden_size:
+    value: 256
+latent_size:
+    value: 2
+max_episode_length:
+    value: 200
+meta_batch_size:
+    value: 32
+n_negative_samples:
+    value: 12
+net_size:
+    value: 256
+num_epochs:
+    value: 5
+num_extra_rl_steps_posterior:
+    value: 400
+num_initial_steps:
+    value: 1200
+num_steps_per_epoch:
+    value: 15
+num_steps_prior:
+    value: 500
+num_tasks_sample:
+    value: 5
+num_test_tasks:
+    value: 5
+num_train_tasks:
+    value: 2
+reward_scale:
+    value: 10
+seed:
+    value: 1
+use_gpu:
+    value: false

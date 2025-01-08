@@ -1,0 +1,321 @@
+2025-01-08 12:38:06 | [CL_point_env] Logging to /Users/paulnitschke/Desktop/projects/geo_meta_rl-9916970f86b9202e9d7063b26b7a6a23cc989802/data/local/experiment/CL_point_env_11
+
+
+Failed to import TF-Keras. Please note that TF-Keras is not installed by default when you install TensorFlow Probability. This is so that JAX-only users do not have to install TensorFlow or TF-Keras. To use TensorFlow Probability with TensorFlow, please install the tf-keras or tf-keras-nightly package.
+This can be be done through installing the tensorflow-probability[tf] extra.
+/Users/paulnitschke/Desktop/projects/geo_meta_rl-9916970f86b9202e9d7063b26b7a6a23cc989802/garage/experiment/deterministic.py:36: UserWarning: Enabeling deterministic mode in PyTorch can have a performance impact when using GPU.
+  warnings.warn(
+
+
+2025-01-08 12:38:07 | [CL_point_env] Obtaining samples...
+/Users/paulnitschke/miniconda3/envs/env_geo_meta_rl/lib/python3.9/site-packages/torch/distributions/distribution.py:53: UserWarning: <class 'garage.torch.distributions.tanh_normal.TanhNormal'> does not define `arg_constraints`. Please set `arg_constraints = {}` or initialize the distribution with `validate_args=False` to turn off validation.
+  warnings.warn(
+/Users/paulnitschke/Desktop/projects/geo_meta_rl-9916970f86b9202e9d7063b26b7a6a23cc989802/garage/_dtypes.py:1051: UserWarning: Observation array([0., 0., 2.]) is outside observation_space Box(-inf, inf, (3,), float32)
+  warnings.warn(
+2025-01-08 12:38:09 | [CL_point_env] epoch #0 | Pre-Training Encoder...
+2025-01-08 12:38:22 | [CL_point_env] epoch #0 | Pre-Training Encoder Done...
+2025-01-08 12:38:22 | [CL_point_env] epoch #0 | Training...
+2025-01-08 12:38:23 | [CL_point_env] epoch #0 | Training Encoder
+
+2025-01-08 12:38:42 | [CL_point_env] epoch #0 | Evaluating...
+2025-01-08 12:38:42 | [CL_point_env] epoch #0 | Sampling for adapation and meta-testing...
+
+
+Failed to import TF-Keras. Please note that TF-Keras is not installed by default when you install TensorFlow Probability. This is so that JAX-only users do not have to install TensorFlow or TF-Keras. To use TensorFlow Probability with TensorFlow, please install the tf-keras or tf-keras-nightly package.
+This can be be done through installing the tensorflow-probability[tf] extra.
+/Users/paulnitschke/Desktop/projects/geo_meta_rl-9916970f86b9202e9d7063b26b7a6a23cc989802/garage/experiment/deterministic.py:36: UserWarning: Enabeling deterministic mode in PyTorch can have a performance impact when using GPU.
+  warnings.warn(
+
+
+2025-01-08 12:38:43 | [CL_point_env] epoch #0 | Finished meta-testing...
+embedding:  [[ 0.22911981  0.6335197   0.07565188  0.2625929  -0.686643  ]]
+embedding:  [[ 0.2230587   0.6440947   0.04397648  0.24127641 -0.6893754 ]]
+2025-01-08 12:38:44 | [CL_point_env] epoch #0 | Sampling for adapation and meta-testing...
+
+
+Failed to import TF-Keras. Please note that TF-Keras is not installed by default when you install TensorFlow Probability. This is so that JAX-only users do not have to install TensorFlow or TF-Keras. To use TensorFlow Probability with TensorFlow, please install the tf-keras or tf-keras-nightly package.
+This can be be done through installing the tensorflow-probability[tf] extra.
+
+
+2025-01-08 12:38:47 | [CL_point_env] epoch #0 | Finished meta-testing...
+embedding:  [[ 0.22911981  0.6335197   0.07565188  0.2625929  -0.686643  ]]
+embedding:  [[ 0.2729641   0.66415775  0.34941706  0.14470933 -0.5842533 ]]
+embedding:  [[ 0.2260967   0.6460218   0.04328964  0.22689956 -0.69150466]]
+embedding:  [[ 0.22004412  0.61064065  0.10252795  0.34036624 -0.67256033]]
+embedding:  [[ 0.23061354  0.63623697  0.0498536   0.25958586 -0.6871315 ]]
+2025-01-08 12:38:48 | [CL_point_env] epoch #0 | Saving snapshot...
+2025-01-08 12:38:48 | [CL_point_env] epoch #0 | Saved
+2025-01-08 12:38:48 | [CL_point_env] epoch #0 | Time 41.45 s
+2025-01-08 12:38:48 | [CL_point_env] epoch #0 | EpochTime 41.45 s
+--------------------------------------------------  ---------
+MetaTest/Average/AverageDiscountedReturn            -207.758
+MetaTest/Average/AverageReturn                      -207.758
+MetaTest/Average/Iteration                             0
+MetaTest/Average/MaxReturn                          -145.403
+MetaTest/Average/MinReturn                          -249.327
+MetaTest/Average/NumEpisodes                           5
+MetaTest/Average/StdReturn                            43.6356
+MetaTest/Average/SuccessRate                           0
+MetaTest/Average/TerminationRate                       0
+MetaTest/__unnamed_task__/AverageDiscountedReturn   -207.758
+MetaTest/__unnamed_task__/AverageReturn             -207.758
+MetaTest/__unnamed_task__/Iteration                    0
+MetaTest/__unnamed_task__/MaxReturn                 -145.403
+MetaTest/__unnamed_task__/MinReturn                 -249.327
+MetaTest/__unnamed_task__/NumEpisodes                  5
+MetaTest/__unnamed_task__/StdReturn                   43.6356
+MetaTest/__unnamed_task__/SuccessRate                  0
+MetaTest/__unnamed_task__/TerminationRate              0
+MetaTrain/Average/AverageDiscountedReturn           -208.101
+MetaTrain/Average/AverageReturn                     -208.101
+MetaTrain/Average/Iteration                            0
+MetaTrain/Average/MaxReturn                         -177.222
+MetaTrain/Average/MinReturn                         -238.98
+MetaTrain/Average/NumEpisodes                          2
+MetaTrain/Average/StdReturn                           30.8786
+MetaTrain/Average/SuccessRate                          0
+MetaTrain/Average/TerminationRate                      0
+MetaTrain/__unnamed_task__/AverageDiscountedReturn  -208.101
+MetaTrain/__unnamed_task__/AverageReturn            -208.101
+MetaTrain/__unnamed_task__/Iteration                   0
+MetaTrain/__unnamed_task__/MaxReturn                -177.222
+MetaTrain/__unnamed_task__/MinReturn                -238.98
+MetaTrain/__unnamed_task__/NumEpisodes                 2
+MetaTrain/__unnamed_task__/StdReturn                  30.8786
+MetaTrain/__unnamed_task__/SuccessRate                 0
+MetaTrain/__unnamed_task__/TerminationRate             0
+TotalEnvSteps                                       6900
+--------------------------------------------------  ---------
+2025-01-08 12:38:50 | [CL_point_env] epoch #1 | Training...
+2025-01-08 12:38:55 | [CL_point_env] epoch #1 | Training Encoder
+
+2025-01-08 12:39:14 | [CL_point_env] epoch #1 | Evaluating...
+2025-01-08 12:39:14 | [CL_point_env] epoch #1 | Sampling for adapation and meta-testing...
+2025-01-08 12:39:15 | [CL_point_env] epoch #1 | Finished meta-testing...
+embedding:  [[-0.22867341 -0.6355932   0.03520449 -0.21124554  0.7055961 ]]
+embedding:  [[-2.3133218e-01 -6.3391477e-01  5.1302393e-04 -2.4557066e-01
+   6.9593984e-01]]
+2025-01-08 12:39:16 | [CL_point_env] epoch #1 | Sampling for adapation and meta-testing...
+2025-01-08 12:39:18 | [CL_point_env] epoch #1 | Finished meta-testing...
+embedding:  [[-0.0647791  -0.22654596  0.7074808   0.10661501  0.6577118 ]]
+embedding:  [[ 0.23089348  0.67682475  0.12598975  0.21348636 -0.6535646 ]]
+embedding:  [[-0.23258525 -0.6250174   0.00339242 -0.25834328  0.69893104]]
+embedding:  [[-0.23259929 -0.6325297   0.011334   -0.24187914  0.6979755 ]]
+embedding:  [[ 0.26757675  0.59467596  0.39447737  0.49591056 -0.4162012 ]]
+2025-01-08 12:39:20 | [CL_point_env] epoch #1 | Saving snapshot...
+2025-01-08 12:39:20 | [CL_point_env] epoch #1 | Saved
+2025-01-08 12:39:20 | [CL_point_env] epoch #1 | Time 73.22 s
+2025-01-08 12:39:20 | [CL_point_env] epoch #1 | EpochTime 31.75 s
+--------------------------------------------------  ----------
+MetaTest/Average/AverageDiscountedReturn             -206.293
+MetaTest/Average/AverageReturn                       -206.293
+MetaTest/Average/Iteration                              1
+MetaTest/Average/MaxReturn                           -170.164
+MetaTest/Average/MinReturn                           -260.216
+MetaTest/Average/NumEpisodes                            5
+MetaTest/Average/StdReturn                             35.3617
+MetaTest/Average/SuccessRate                            0
+MetaTest/Average/TerminationRate                        0
+MetaTest/__unnamed_task__/AverageDiscountedReturn    -206.293
+MetaTest/__unnamed_task__/AverageReturn              -206.293
+MetaTest/__unnamed_task__/Iteration                     1
+MetaTest/__unnamed_task__/MaxReturn                  -170.164
+MetaTest/__unnamed_task__/MinReturn                  -260.216
+MetaTest/__unnamed_task__/NumEpisodes                   5
+MetaTest/__unnamed_task__/StdReturn                    35.3617
+MetaTest/__unnamed_task__/SuccessRate                   0
+MetaTest/__unnamed_task__/TerminationRate               0
+MetaTrain/Average/AverageDiscountedReturn            -215.607
+MetaTrain/Average/AverageReturn                      -215.607
+MetaTrain/Average/Iteration                             1
+MetaTrain/Average/MaxReturn                          -169.93
+MetaTrain/Average/MinReturn                          -261.285
+MetaTrain/Average/NumEpisodes                           2
+MetaTrain/Average/StdReturn                            45.6779
+MetaTrain/Average/SuccessRate                           0
+MetaTrain/Average/TerminationRate                       0
+MetaTrain/__unnamed_task__/AverageDiscountedReturn   -215.607
+MetaTrain/__unnamed_task__/AverageReturn             -215.607
+MetaTrain/__unnamed_task__/Iteration                    1
+MetaTrain/__unnamed_task__/MaxReturn                 -169.93
+MetaTrain/__unnamed_task__/MinReturn                 -261.285
+MetaTrain/__unnamed_task__/NumEpisodes                  2
+MetaTrain/__unnamed_task__/StdReturn                   45.6779
+MetaTrain/__unnamed_task__/SuccessRate                  0
+MetaTrain/__unnamed_task__/TerminationRate              0
+TotalEnvSteps                                       11400
+--------------------------------------------------  ----------
+2025-01-08 12:39:22 | [CL_point_env] epoch #2 | Training...
+2025-01-08 12:39:28 | [CL_point_env] epoch #2 | Training Encoder
+
+2025-01-08 12:39:47 | [CL_point_env] epoch #2 | Evaluating...
+2025-01-08 12:39:47 | [CL_point_env] epoch #2 | Sampling for adapation and meta-testing...
+2025-01-08 12:39:48 | [CL_point_env] epoch #2 | Finished meta-testing...
+embedding:  [[-0.25466028 -0.6555564  -0.20373487 -0.33081612  0.5953543 ]]
+embedding:  [[-0.2635124  -0.6593758  -0.09806335 -0.31709582  0.62098205]]
+2025-01-08 12:39:48 | [CL_point_env] epoch #2 | Sampling for adapation and meta-testing...
+2025-01-08 12:39:51 | [CL_point_env] epoch #2 | Finished meta-testing...
+embedding:  [[ 0.0939194   0.13886534 -0.91407776 -0.06118624 -0.36416143]]
+embedding:  [[-0.25999916 -0.65913755 -0.12936634 -0.32746866  0.61152816]]
+embedding:  [[-0.26123625 -0.6588798  -0.11065023 -0.31994972  0.6188875 ]]
+embedding:  [[-0.26262966 -0.65832597 -0.0896361  -0.31510514  0.6247453 ]]
+embedding:  [[-0.2593184  -0.6587912  -0.14287381 -0.3270993   0.6093777 ]]
+2025-01-08 12:39:52 | [CL_point_env] epoch #2 | Saving snapshot...
+2025-01-08 12:39:52 | [CL_point_env] epoch #2 | Saved
+2025-01-08 12:39:52 | [CL_point_env] epoch #2 | Time 105.30 s
+2025-01-08 12:39:52 | [CL_point_env] epoch #2 | EpochTime 32.08 s
+--------------------------------------------------  ----------
+MetaTest/Average/AverageDiscountedReturn             -176.836
+MetaTest/Average/AverageReturn                       -176.836
+MetaTest/Average/Iteration                              2
+MetaTest/Average/MaxReturn                           -111.377
+MetaTest/Average/MinReturn                           -261.603
+MetaTest/Average/NumEpisodes                            5
+MetaTest/Average/StdReturn                             67.1462
+MetaTest/Average/SuccessRate                            0
+MetaTest/Average/TerminationRate                        0
+MetaTest/__unnamed_task__/AverageDiscountedReturn    -176.836
+MetaTest/__unnamed_task__/AverageReturn              -176.836
+MetaTest/__unnamed_task__/Iteration                     2
+MetaTest/__unnamed_task__/MaxReturn                  -111.377
+MetaTest/__unnamed_task__/MinReturn                  -261.603
+MetaTest/__unnamed_task__/NumEpisodes                   5
+MetaTest/__unnamed_task__/StdReturn                    67.1462
+MetaTest/__unnamed_task__/SuccessRate                   0
+MetaTest/__unnamed_task__/TerminationRate               0
+MetaTrain/Average/AverageDiscountedReturn            -229.022
+MetaTrain/Average/AverageReturn                      -229.022
+MetaTrain/Average/Iteration                             2
+MetaTrain/Average/MaxReturn                          -130.261
+MetaTrain/Average/MinReturn                          -327.782
+MetaTrain/Average/NumEpisodes                           2
+MetaTrain/Average/StdReturn                            98.7606
+MetaTrain/Average/SuccessRate                           0
+MetaTrain/Average/TerminationRate                       0
+MetaTrain/__unnamed_task__/AverageDiscountedReturn   -229.022
+MetaTrain/__unnamed_task__/AverageReturn             -229.022
+MetaTrain/__unnamed_task__/Iteration                    2
+MetaTrain/__unnamed_task__/MaxReturn                 -130.261
+MetaTrain/__unnamed_task__/MinReturn                 -327.782
+MetaTrain/__unnamed_task__/NumEpisodes                  2
+MetaTrain/__unnamed_task__/StdReturn                   98.7606
+MetaTrain/__unnamed_task__/SuccessRate                  0
+MetaTrain/__unnamed_task__/TerminationRate              0
+TotalEnvSteps                                       15900
+--------------------------------------------------  ----------
+2025-01-08 12:39:54 | [CL_point_env] epoch #3 | Training...
+2025-01-08 12:39:55 | [CL_point_env] epoch #3 | Training Encoder
+
+2025-01-08 12:40:15 | [CL_point_env] epoch #3 | Evaluating...
+2025-01-08 12:40:15 | [CL_point_env] epoch #3 | Sampling for adapation and meta-testing...
+2025-01-08 12:40:16 | [CL_point_env] epoch #3 | Finished meta-testing...
+embedding:  [[-0.24030697 -0.6499385  -0.11718144 -0.26655382  0.6595833 ]]
+embedding:  [[ 0.26703018  0.61113465 -0.19764856  0.2700538  -0.6657441 ]]
+2025-01-08 12:40:17 | [CL_point_env] epoch #3 | Sampling for adapation and meta-testing...
+2025-01-08 12:40:19 | [CL_point_env] epoch #3 | Finished meta-testing...
+embedding:  [[-0.19545956 -0.6204267  -0.37947932 -0.20480493  0.62523335]]
+embedding:  [[ 0.26371112  0.6402951  -0.12247417  0.31670174 -0.6365366 ]]
+embedding:  [[ 0.26675355  0.6338478  -0.08081785  0.28830996 -0.6613814 ]]
+embedding:  [[ 0.26572725  0.63100713 -0.09210809  0.27986753 -0.66664016]]
+embedding:  [[-0.06848299 -0.40297765 -0.85722625 -0.20992212  0.23241112]]
+2025-01-08 12:40:20 | [CL_point_env] epoch #3 | Saving snapshot...
+2025-01-08 12:40:20 | [CL_point_env] epoch #3 | Saved
+2025-01-08 12:40:20 | [CL_point_env] epoch #3 | Time 133.75 s
+2025-01-08 12:40:20 | [CL_point_env] epoch #3 | EpochTime 28.44 s
+--------------------------------------------------  ------------
+MetaTest/Average/AverageDiscountedReturn             -233.159
+MetaTest/Average/AverageReturn                       -233.159
+MetaTest/Average/Iteration                              3
+MetaTest/Average/MaxReturn                           -106.243
+MetaTest/Average/MinReturn                           -390.26
+MetaTest/Average/NumEpisodes                            6
+MetaTest/Average/StdReturn                            111.034
+MetaTest/Average/SuccessRate                            0.166667
+MetaTest/Average/TerminationRate                        0.166667
+MetaTest/__unnamed_task__/AverageDiscountedReturn    -233.159
+MetaTest/__unnamed_task__/AverageReturn              -233.159
+MetaTest/__unnamed_task__/Iteration                     3
+MetaTest/__unnamed_task__/MaxReturn                  -106.243
+MetaTest/__unnamed_task__/MinReturn                  -390.26
+MetaTest/__unnamed_task__/NumEpisodes                   6
+MetaTest/__unnamed_task__/StdReturn                   111.034
+MetaTest/__unnamed_task__/SuccessRate                   0.166667
+MetaTest/__unnamed_task__/TerminationRate               0.166667
+MetaTrain/Average/AverageDiscountedReturn            -248.509
+MetaTrain/Average/AverageReturn                      -248.509
+MetaTrain/Average/Iteration                             3
+MetaTrain/Average/MaxReturn                          -136.532
+MetaTrain/Average/MinReturn                          -360.486
+MetaTrain/Average/NumEpisodes                           2
+MetaTrain/Average/StdReturn                           111.977
+MetaTrain/Average/SuccessRate                           0
+MetaTrain/Average/TerminationRate                       0
+MetaTrain/__unnamed_task__/AverageDiscountedReturn   -248.509
+MetaTrain/__unnamed_task__/AverageReturn             -248.509
+MetaTrain/__unnamed_task__/Iteration                    3
+MetaTrain/__unnamed_task__/MaxReturn                 -136.532
+MetaTrain/__unnamed_task__/MinReturn                 -360.486
+MetaTrain/__unnamed_task__/NumEpisodes                  2
+MetaTrain/__unnamed_task__/StdReturn                  111.977
+MetaTrain/__unnamed_task__/SuccessRate                  0
+MetaTrain/__unnamed_task__/TerminationRate              0
+TotalEnvSteps                                       20400
+--------------------------------------------------  ------------
+2025-01-08 12:40:22 | [CL_point_env] epoch #4 | Training...
+2025-01-08 12:40:26 | [CL_point_env] epoch #4 | Training Encoder
+
+2025-01-08 12:40:45 | [CL_point_env] epoch #4 | Evaluating...
+2025-01-08 12:40:45 | [CL_point_env] epoch #4 | Sampling for adapation and meta-testing...
+2025-01-08 12:40:46 | [CL_point_env] epoch #4 | Finished meta-testing...
+embedding:  [[ 0.2766575   0.67219746 -0.07220935  0.3117056  -0.6076485 ]]
+embedding:  [[-0.2686626  -0.65063465 -0.07222645 -0.31688088  0.6315574 ]]
+2025-01-08 12:40:47 | [CL_point_env] epoch #4 | Sampling for adapation and meta-testing...
+2025-01-08 12:40:49 | [CL_point_env] epoch #4 | Finished meta-testing...
+embedding:  [[ 0.27207178  0.6783339  -0.13186513  0.29754022 -0.5999346 ]]
+embedding:  [[-0.27149558 -0.6364751  -0.13965592 -0.32329336  0.630212  ]]
+embedding:  [[-0.2694368  -0.65056205 -0.06437536 -0.31334063  0.6339135 ]]
+embedding:  [[-0.2710954  -0.6150065  -0.21870948 -0.3259032   0.6278753 ]]
+embedding:  [[-0.26295552 -0.6058536  -0.19380467 -0.2938353   0.66324687]]
+2025-01-08 12:40:50 | [CL_point_env] epoch #4 | Saving snapshot...
+2025-01-08 12:40:50 | [CL_point_env] epoch #4 | Saved
+2025-01-08 12:40:50 | [CL_point_env] epoch #4 | Time 163.65 s
+2025-01-08 12:40:50 | [CL_point_env] epoch #4 | EpochTime 29.89 s
+--------------------------------------------------  ----------
+MetaTest/Average/AverageDiscountedReturn             -339.424
+MetaTest/Average/AverageReturn                       -339.424
+MetaTest/Average/Iteration                              4
+MetaTest/Average/MaxReturn                           -231.799
+MetaTest/Average/MinReturn                           -476.298
+MetaTest/Average/NumEpisodes                            5
+MetaTest/Average/StdReturn                             90.5606
+MetaTest/Average/SuccessRate                            0
+MetaTest/Average/TerminationRate                        0
+MetaTest/__unnamed_task__/AverageDiscountedReturn    -339.424
+MetaTest/__unnamed_task__/AverageReturn              -339.424
+MetaTest/__unnamed_task__/Iteration                     4
+MetaTest/__unnamed_task__/MaxReturn                  -231.799
+MetaTest/__unnamed_task__/MinReturn                  -476.298
+MetaTest/__unnamed_task__/NumEpisodes                   5
+MetaTest/__unnamed_task__/StdReturn                    90.5606
+MetaTest/__unnamed_task__/SuccessRate                   0
+MetaTest/__unnamed_task__/TerminationRate               0
+MetaTrain/Average/AverageDiscountedReturn            -395.365
+MetaTrain/Average/AverageReturn                      -395.365
+MetaTrain/Average/Iteration                             4
+MetaTrain/Average/MaxReturn                          -297.988
+MetaTrain/Average/MinReturn                          -492.742
+MetaTrain/Average/NumEpisodes                           2
+MetaTrain/Average/StdReturn                            97.3772
+MetaTrain/Average/SuccessRate                           0
+MetaTrain/Average/TerminationRate                       0
+MetaTrain/__unnamed_task__/AverageDiscountedReturn   -395.365
+MetaTrain/__unnamed_task__/AverageReturn             -395.365
+MetaTrain/__unnamed_task__/Iteration                    4
+MetaTrain/__unnamed_task__/MaxReturn                 -297.988
+MetaTrain/__unnamed_task__/MinReturn                 -492.742
+MetaTrain/__unnamed_task__/NumEpisodes                  2
+MetaTrain/__unnamed_task__/StdReturn                   97.3772
+MetaTrain/__unnamed_task__/SuccessRate                  0
+MetaTrain/__unnamed_task__/TerminationRate              0
+TotalEnvSteps                                       24900
+--------------------------------------------------  ----------

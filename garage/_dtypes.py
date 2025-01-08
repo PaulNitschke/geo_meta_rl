@@ -527,7 +527,7 @@ class EpisodeBatch(TimeStepBatch):
 
     def __init__(self, env_spec, episode_infos, observations,
                  last_observations, actions, rewards, env_infos, agent_infos,
-                 step_types, lengths):  # noqa: D102
+                 step_types, lengths, embeddings=None):  # noqa: D102
         # lengths
         if len(lengths.shape) != 1:
             raise ValueError(
@@ -583,6 +583,8 @@ class EpisodeBatch(TimeStepBatch):
         object.__setattr__(self, 'env_infos', env_infos)
         object.__setattr__(self, 'agent_infos', agent_infos)
         object.__setattr__(self, 'step_types', step_types)
+        if embeddings is not None:
+            object.__setattr__(self, 'embeddings', embeddings)
         check_timestep_batch(
             self,
             np.ndarray,

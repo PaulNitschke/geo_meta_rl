@@ -226,6 +226,7 @@ def log_multitask_performance(itr, batch, discount, name_map=None):
                 tabular.record('MinReturn', np.nan)
                 tabular.record('TerminationRate', np.nan)
                 tabular.record('SuccessRate', np.nan)
+                tabular.record('AllReturns', np.array([]))
 
     return log_performance(itr, batch, discount=discount, prefix='Average')
 
@@ -248,6 +249,7 @@ def log_performance(itr, batch, discount, prefix='Evaluation'):
     termination = []
     success = []
     for eps in batch.split():
+        breakpoint=True
         returns.append(discount_cumsum(eps.rewards, discount))
         undiscounted_returns.append(sum(eps.rewards))
         termination.append(
@@ -271,5 +273,6 @@ def log_performance(itr, batch, discount, prefix='Evaluation'):
         tabular.record('TerminationRate', np.mean(termination))
         if success:
             tabular.record('SuccessRate', np.mean(success))
+        tabular.record('AllReturns', undiscounted_returns)
 
     return undiscounted_returns

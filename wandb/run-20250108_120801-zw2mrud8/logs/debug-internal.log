@@ -1,0 +1,16 @@
+{"time":"2025-01-08T12:08:01.174977+01:00","level":"INFO","msg":"using version","core version":"0.19.1"}
+{"time":"2025-01-08T12:08:01.175029+01:00","level":"INFO","msg":"created symlink","path":"/Users/paulnitschke/Desktop/projects/geo_meta_rl-9916970f86b9202e9d7063b26b7a6a23cc989802/wandb/run-20250108_120801-zw2mrud8/logs/debug-core.log"}
+{"time":"2025-01-08T12:08:01.305224+01:00","level":"INFO","msg":"created new stream","id":"zw2mrud8"}
+{"time":"2025-01-08T12:08:01.305592+01:00","level":"INFO","msg":"stream: started","id":"zw2mrud8"}
+{"time":"2025-01-08T12:08:01.305588+01:00","level":"INFO","msg":"sender: started","stream_id":"zw2mrud8"}
+{"time":"2025-01-08T12:08:01.305592+01:00","level":"INFO","msg":"writer: Do: started","stream_id":"zw2mrud8"}
+{"time":"2025-01-08T12:08:01.305589+01:00","level":"INFO","msg":"handler: started","stream_id":"zw2mrud8"}
+{"time":"2025-01-08T12:08:01.756298+01:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-01-08T12:08:39.278147+01:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-01-08T12:08:39.278659+01:00","level":"INFO","msg":"stream: closing","id":"zw2mrud8"}
+{"time":"2025-01-08T12:08:39.285228+01:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-01-08T12:08:39.948276+01:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-01-08T12:08:40.236948+01:00","level":"INFO","msg":"handler: closed","stream_id":"zw2mrud8"}
+{"time":"2025-01-08T12:08:40.2383+01:00","level":"INFO","msg":"writer: Close: closed","stream_id":"zw2mrud8"}
+{"time":"2025-01-08T12:08:40.238683+01:00","level":"INFO","msg":"sender: closed","stream_id":"zw2mrud8"}
+{"time":"2025-01-08T12:08:40.240581+01:00","level":"INFO","msg":"stream: closed","id":"zw2mrud8"}
