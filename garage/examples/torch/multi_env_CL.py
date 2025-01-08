@@ -40,11 +40,11 @@ from garage.envs import normalize, PointEnv
 # @click.option('--embedding_mini_batch_size', default=64)
 # @click.option('--max_episode_length', default=200)
 
-config={
-    "seed": 2,
+default_config={
+    "seed": 1,
     "num_epochs": 5,
     "num_train_tasks": 2,
-    "num_test_tasks": 20,
+    "num_test_tasks": 5,
     "latent_size": 5,
     "encoder_hidden_size": 256,
     "net_size": 256,
@@ -63,9 +63,15 @@ config={
     "use_gpu": False,
 }
 
+custom_config={
+}
+
+config = {**default_config, **custom_config}
+
 wandb.init(project="CL_point_env",
            entity="pnitschke",
-           name="vanilla_config",
+           name="PretrainEncoderEachEpisode",
+        #    name="_".join(f"{key}:{value}" for key, value in custom_config.items()) if custom_config else "VanillaConfig",
            config=config)
 
 

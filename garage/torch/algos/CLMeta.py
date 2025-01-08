@@ -316,20 +316,20 @@ class CLMETA(MetaRLAlgorithm):
                                          self._update_post_train,
                                          add_to_enc_buffer=False)
 
-            if epoch==0:
-                logger.log('Pre-Training Encoder...')
-                self.epoch_cont_loss=0
-                indices = np.random.choice(range(self._num_train_tasks),
-                            self._meta_batch_size)
-                cl_loss_converged=False
-                idx_cont_loss = 0
-                while not cl_loss_converged and idx_cont_loss < 1000:
-                    self._optimize_contrastive_loss(indices)
-                    if idx_cont_loss % 50 == 0: #TODO, this check is only valid if the global CL optimum (e.g. orthogonal embeddings) can be achieved. need to change this later.
-                        cl_loss_converged = self._did_cl_loss_converge(indices)
-                    idx_cont_loss += 1
-                logger.log('Pre-Training Encoder Done...')
-                self._optimize_contrastive_loss(indices, log_mean_task_embeddings=True)
+            # if epoch==0: #TODO, now always pre-training
+            logger.log('Pre-Training Encoder...')
+            self.epoch_cont_loss=0
+            indices = np.random.choice(range(self._num_train_tasks),
+                        self._meta_batch_size)
+            cl_loss_converged=False
+            idx_cont_loss = 0
+            while not cl_loss_converged and idx_cont_loss < 1000:
+                self._optimize_contrastive_loss(indices)
+                if idx_cont_loss % 50 == 0: #TODO, this check is only valid if the global CL optimum (e.g. orthogonal embeddings) can be achieved. need to change this later.
+                    cl_loss_converged = self._did_cl_loss_converge(indices)
+                idx_cont_loss += 1
+            logger.log('Pre-Training Encoder Done...')
+            self._optimize_contrastive_loss(indices, log_mean_task_embeddings=True)
 
             logger.log('Training...')
             self._train_once()
