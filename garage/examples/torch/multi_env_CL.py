@@ -64,14 +64,16 @@ default_config={
 }
 
 custom_config={
+    "num_steps_per_epoch": 5,
+    "num_epochs": 10,
+    "latent_dim": 2
 }
 
 config = {**default_config, **custom_config}
 
 wandb.init(project="CL_point_env",
            entity="pnitschke",
-           name="PretrainEncoderEachEpisode",
-        #    name="_".join(f"{key}:{value}" for key, value in custom_config.items()) if custom_config else "VanillaConfig",
+           name="_".join(f"{key}:{value}" for key, value in custom_config.items()) if custom_config else "VanillaConfig",
            config=config)
 
 

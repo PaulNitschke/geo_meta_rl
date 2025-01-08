@@ -364,7 +364,6 @@ class CLMETA(MetaRLAlgorithm):
                 idx_cont_loss += 1
 
             self._optimize_contrastive_loss(indices, log_mean_task_embeddings=True)
-            logger.log("Training Encoder\n")
             self.epoch_cont_loss = 0
 
             #Train Policy.
