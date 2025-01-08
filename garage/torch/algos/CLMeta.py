@@ -10,6 +10,7 @@ from dowel import logger, tabular
 import numpy as np
 import torch
 import torch.nn.functional as F
+import wandb
 
 from garage import EnvSpec, InOutSpec, StepType, TimeStep
 from garage.experiment import MetaEvaluator
@@ -281,6 +282,7 @@ class CLMETA(MetaRLAlgorithm):
                 such as snapshotting and sampler control.
 
         """
+        self._previous_task_embedding = None
         for _ in trainer.step_epochs():
             epoch = trainer.step_itr / self._num_steps_per_epoch
 
@@ -320,13 +322,11 @@ class CLMETA(MetaRLAlgorithm):
                 indices = np.random.choice(range(self._num_train_tasks),
                             self._meta_batch_size)
                 cl_loss_converged=False
-                prev_cont_loss = np.inf
                 idx_cont_loss = 0
                 while not cl_loss_converged and idx_cont_loss < 1000:
-                    cont_loss=self._optimize_contrastive_loss(indices)
-                    if torch.abs(cont_loss-prev_cont_loss)<1e-3:
-                        cl_loss_converged=True
-                    prev_cont_loss = cont_loss
+                    self._optimize_contrastive_loss(indices)
+                    if idx_cont_loss % 50 == 0: #TODO, this check is only valid if the global CL optimum (e.g. orthogonal embeddings) can be achieved. need to change this later.
+                        cl_loss_converged = self._did_cl_loss_converge(indices)
                     idx_cont_loss += 1
                 logger.log('Pre-Training Encoder Done...')
                 self._optimize_contrastive_loss(indices, log_mean_task_embeddings=True)
@@ -365,14 +365,12 @@ class CLMETA(MetaRLAlgorithm):
 
             self._optimize_contrastive_loss(indices, log_mean_task_embeddings=True)
             logger.log("Training Encoder\n")
-            tabular.record("Embedding/MeanContrastiveLoss", self.epoch_cont_loss/N_STEPS)
             self.epoch_cont_loss = 0
 
             #Train Policy.
             for _ in range(N_STEPS):
                 self._optimize_policy(indices)
             self._optimize_policy(indices, log_diagnostics=True) #TODO, change back to true
-            logger.log(tabular)
 
     def _optimize_contrastive_loss(self, indices, 
                                    step_optimizer=True,
@@ -404,9 +402,16 @@ class CLMETA(MetaRLAlgorithm):
             self.context_optimizer.step()
         if log_mean_task_embeddings:
             mean_task_embeddings = self._compute_mean_embedding(indices)
-            logger.log("Mean Task Embeddings (n_tasks x embedding_dim): {}".format(mean_task_embeddings))
-            tabular.record("mean_task_embeddings", mean_task_embeddings)
-            logger.log(tabular)
+            self._did_cl_loss_converge(indices)
+            if self._previous_task_embedding is not None:
+                wandb.log({
+                    "TaskEmbeddingOverEpisodes/MeanTaskEmbeddingChange": torch.cosine_similarity(mean_task_embeddings, self._previous_task_embedding).mean().item(),
+                    "TaskEmbeddingOverEpisodes/MaxTaskEmbeddingChange": torch.cosine_similarity(mean_task_embeddings, self._previous_task_embedding).max().item(),
+                    "TaskEmbeddingOverEpisodes/MinTaskEmbeddingChange": torch.cosine_similarity(mean_task_embeddings, self._previous_task_embedding).min().item(),
+                    "TaskEmbedding/MeanContrastiveLoss": cont_loss.item(),
+                    "TaskEmbedding/MeanTaskEmbedding": mean_task_embeddings.detach().cpu().numpy()
+                    })
+            self._previous_task_embedding = mean_task_embeddings
 
         return cont_loss
 
@@ -419,15 +424,21 @@ class CLMETA(MetaRLAlgorithm):
         sample_counts.index_add_(0, indices, torch.ones_like(indices, dtype=torch.float))
         mean_task_embeddings = (_mean_task_embeddings.T / sample_counts).T
         self.pairwise_cosine_similarity = torch.mm(F.normalize(mean_task_embeddings, p=2, dim=1), F.normalize(mean_task_embeddings, p=2, dim=1).T)
-        logger.log("Pairwise Similarity Matrix: {}".format(self.pairwise_cosine_similarity))
         return mean_task_embeddings
 
-    def _did_if_cl_loss_converged(self, indices):
+    def _did_cl_loss_converge(self, indices):
         """Check if the contrastive loss has converged. This is true if the embedding vectors of different tasks are diagnoal, e.g. their cosine similarity is -1."""
-        self._compute_mean_embedding(self, indices)
+        self._compute_mean_embedding(indices)
         diagonal_mask = torch.eye(self.pairwise_cosine_similarity.size(0), dtype=torch.bool)
         off_diagonal_elements = self.pairwise_cosine_similarity[~diagonal_mask]
-        cl_loss_converged = torch.allclose(off_diagonal_elements, torch.full_like(off_diagonal_elements, -1), atol=1e-3)
+        cl_loss_converged = torch.allclose(off_diagonal_elements, torch.full_like(off_diagonal_elements, -1), atol=0.1)
+
+        wandb.log({
+            "TaskEmbeddingRelationship/MeanCosineSimilarity (higher is worse)": off_diagonal_elements.mean().item(),
+            "TaskEmbeddingRelationship/MaxCosineSimilarity (higher is worse)": off_diagonal_elements.max().item(),
+            "TaskEmbeddingRelationship/MinCosineSimilarity (higher is worse)": off_diagonal_elements.min().item(),
+            "TaskEmbeddingRelationship/StdCosineSimilarity (higher is worse)": off_diagonal_elements.std().item(),
+        })
         
         return cl_loss_converged
 
@@ -510,13 +521,14 @@ class CLMETA(MetaRLAlgorithm):
         self._policy_optimizer.step()
 
         if log_diagnostics:
-            tabular.record('PolicyTraining/QfLoss', qf_loss.item())
-            tabular.record('PolicyTraining/VfLoss', vf_loss.item())
-            tabular.record('PolicyTraining/PolicyLoss', policy_loss.item())
-            tabular.record('PolicyTraining/MeanQ1Vals', q1.mean().item())
-            tabular.record('PolicyTraining/MeanQ2Vals', q2.mean().item())
-            tabular.record('PolicyTraining/MeanVVals', v_pred.mean().item())
-            logger.log(tabular)
+            wandb.log({
+                'PolicyTraining/QfLoss': qf_loss.item(),
+                'PolicyTraining/VfLoss': vf_loss.item(),
+                'PolicyTraining/PolicyLoss': policy_loss.item(),
+                'PolicyTraining/MeanQ1Vals': q1.mean().item(),
+                'PolicyTraining/MeanQ2Vals': q2.mean().item(),
+                'PolicyTraining/MeanVVals': v_pred.mean().item()
+            })
 
     def _obtain_samples(self,
                         trainer,

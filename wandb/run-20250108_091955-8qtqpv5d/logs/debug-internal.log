@@ -1,0 +1,16 @@
+{"time":"2025-01-08T09:19:55.829071+01:00","level":"INFO","msg":"using version","core version":"0.19.1"}
+{"time":"2025-01-08T09:19:55.829121+01:00","level":"INFO","msg":"created symlink","path":"/Users/paulnitschke/Desktop/projects/geo_meta_rl/wandb/run-20250108_091955-8qtqpv5d/logs/debug-core.log"}
+{"time":"2025-01-08T09:19:55.956346+01:00","level":"INFO","msg":"created new stream","id":"8qtqpv5d"}
+{"time":"2025-01-08T09:19:55.956663+01:00","level":"INFO","msg":"writer: Do: started","stream_id":"8qtqpv5d"}
+{"time":"2025-01-08T09:19:55.956722+01:00","level":"INFO","msg":"stream: started","id":"8qtqpv5d"}
+{"time":"2025-01-08T09:19:55.956804+01:00","level":"INFO","msg":"sender: started","stream_id":"8qtqpv5d"}
+{"time":"2025-01-08T09:19:55.956681+01:00","level":"INFO","msg":"handler: started","stream_id":"8qtqpv5d"}
+{"time":"2025-01-08T09:19:56.3414+01:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-01-08T09:20:14.548481+01:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-01-08T09:20:14.549369+01:00","level":"INFO","msg":"stream: closing","id":"8qtqpv5d"}
+{"time":"2025-01-08T09:20:14.553232+01:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-01-08T09:20:15.287522+01:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-01-08T09:20:15.597775+01:00","level":"INFO","msg":"handler: closed","stream_id":"8qtqpv5d"}
+{"time":"2025-01-08T09:20:15.598159+01:00","level":"INFO","msg":"writer: Close: closed","stream_id":"8qtqpv5d"}
+{"time":"2025-01-08T09:20:15.598205+01:00","level":"INFO","msg":"sender: closed","stream_id":"8qtqpv5d"}
+{"time":"2025-01-08T09:20:15.601356+01:00","level":"INFO","msg":"stream: closed","id":"8qtqpv5d"}

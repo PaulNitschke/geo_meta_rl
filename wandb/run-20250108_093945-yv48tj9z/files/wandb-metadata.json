@@ -1,0 +1,35 @@
+{
+  "os": "macOS-10.16-x86_64-i386-64bit",
+  "python": "CPython 3.9.21",
+  "startedAt": "2025-01-08T08:39:45.131040Z",
+  "program": "/Users/paulnitschke/Desktop/projects/geo_meta_rl/garage/examples/torch/multi_env_CL.py",
+  "codePath": "garage/examples/torch/multi_env_CL.py",
+  "git": {
+    "remote": "git@github.com:PaulNitschke/geo_meta_rl.git",
+    "commit": "4d73743e1b22ee081405b6fa8a1c934cbe775a70"
+  },
+  "email": "pnitschke@fas.harvard.edu",
+  "root": "/Users/paulnitschke/Desktop/projects/geo_meta_rl",
+  "host": "Pauls-MBP-2.fritz.box",
+  "executable": "/Users/paulnitschke/miniconda3/envs/env_geo_meta_rl/bin/python3",
+  "codePathLocal": "garage/examples/torch/multi_env_CL.py",
+  "cpu_count": 11,
+  "cpu_count_logical": 11,
+  "disk": {
+    "/": {
+      "total": "494384795648",
+      "used": "100578512896"
+    },
+    "/System/Volumes/Data": {
+      "total": "494384795648",
+      "used": "100578512896"
+    }
+  },
+  "memory": {
+    "total": "19327352832"
+  },
+  "cpu": {
+    "count": 11,
+    "countLogical": 11
+  }
+}
