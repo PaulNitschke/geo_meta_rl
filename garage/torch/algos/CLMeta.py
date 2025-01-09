@@ -326,12 +326,12 @@ class CLMETA(MetaRLAlgorithm):
                         self._meta_batch_size)
             cl_loss_converged=False
             idx_cont_loss = 0
-            while not cl_loss_converged and idx_cont_loss < 1000:
+            while not cl_loss_converged and idx_cont_loss < 250:
                 self._optimize_contrastive_loss(indices)
                 if idx_cont_loss % 50 == 0: #TODO, this check is only valid if the global CL optimum (e.g. orthogonal embeddings) can be achieved. need to change this later.
                     cl_loss_converged = self._did_cl_loss_converge(indices)
                 idx_cont_loss += 1
-            logger.log('Pre-Training Encoder Done...')
+            logger.log(f'Pre-Training Encoder Done after {idx_cont_loss} steps...')
 
             logger.log('Training...')
             self._train_once()
@@ -355,7 +355,7 @@ class CLMETA(MetaRLAlgorithm):
             prev_cont_loss = torch.inf
             idx_cont_loss = 0
             cl_loss_converged=False
-            while not cl_loss_converged and idx_cont_loss<200:
+            while not cl_loss_converged and idx_cont_loss<200: #TODO, changed from 200
                 cont_loss=self._optimize_contrastive_loss(indices)
                 if torch.abs(cont_loss-prev_cont_loss)<1e-3:
                     cl_loss_converged=True
@@ -363,7 +363,6 @@ class CLMETA(MetaRLAlgorithm):
                 prev_cont_loss = cont_loss
                 idx_cont_loss += 1
 
-            self._optimize_contrastive_loss(indices)
 
             #Train Policy.
             for _ in range(N_STEPS):
@@ -394,35 +393,38 @@ class CLMETA(MetaRLAlgorithm):
         # Penalty to ensure that the embedding doesn't change too much between episodes
         if self._previous_z is not None and self._weight_embedding_loss_continuity is not None:
             breakpoint = True
-            _embedding_loss_continuity = torch.cosine_similarity(self.current_z, self._previous_z).mean()
+            _embedding_loss_continuity = -torch.cosine_similarity(self.current_z, self._previous_z).mean()
 
             total_cont_loss = cont_loss + self._weight_embedding_loss_continuity * _embedding_loss_continuity
             wandb.log({
-                "Emb/TotalContrastiveLoss": total_cont_loss.item(),
-                "Emb/MeanContrastiveLoss": cont_loss.item(),
-                "Emb/EmbeddingLossContinuity": _embedding_loss_continuity.item()
+                "EmbTraining/TotalContrastiveLoss": total_cont_loss.item(),
+                "EmbTraining/ContrastiveLoss": cont_loss.item(),
+                "EmbTraining/EmbeddingLossContinuity": _embedding_loss_continuity.item()
             })
-            self._previous_z = self.current_z
         else:
             total_cont_loss = cont_loss
             wandb.log({
-                "Emb/TotalContrastiveLoss": total_cont_loss.item(),
-                "Emb/MeanContrastiveLoss": cont_loss.item()
+                "EmbTraining/TotalContrastiveLoss": total_cont_loss.item(),
+                "EmbTraining/MeanContrastiveLoss": cont_loss.item()
             })
+
+        self._previous_z = self.current_z.detach()
+
 
         # Update the embedding
         total_cont_loss.backward(retain_graph=True)
+        self.context_optimizer.step()
 
         # Logging
         mean_task_embeddings = self._compute_mean_embedding(indices)
         self._did_cl_loss_converge(indices)
         if self._previous_task_embedding is not None:
 
-            # Logs the change in the embedding relative to the previous episode
+            # Logs the similarity between the current embedding and the embedding from the previous episode.
             wandb.log({
-                "EmbEpisodeChange/Mean": torch.cosine_similarity(mean_task_embeddings, self._previous_task_embedding).mean().item(),
-                "EmbEpisodeChange/Max": torch.cosine_similarity(mean_task_embeddings, self._previous_task_embedding).max().item(),
-                "EmbEpisodeChange/Min": torch.cosine_similarity(mean_task_embeddings, self._previous_task_embedding).min().item(),
+                "EmbEpisodeConsistency/Mean (higher is better)": torch.cosine_similarity(mean_task_embeddings, self._previous_task_embedding).mean().item(),
+                "EmbEpisodeConsistency/Max (higher is better)": torch.cosine_similarity(mean_task_embeddings, self._previous_task_embedding).max().item(),
+                "EmbEpisodeConsistency/Min (higher is better)": torch.cosine_similarity(mean_task_embeddings, self._previous_task_embedding).min().item(),
                 })
             
             # Logs the mean embeddings of each task
@@ -458,10 +460,10 @@ class CLMETA(MetaRLAlgorithm):
         cl_loss_converged = torch.allclose(off_diagonal_elements, torch.full_like(off_diagonal_elements, -1), atol=0.1)
 
         wandb.log({
-            "EmbRelationship/MeanCosSim (higher is worse)": off_diagonal_elements.mean().item(),
-            "EmbRelationship/MaxCosSim (higher is worse)": off_diagonal_elements.max().item(),
-            "EmbRelationship/MinCosSim (higher is worse)": off_diagonal_elements.min().item(),
-            "EmbRelationship/StdCosSim (higher is worse)": off_diagonal_elements.std().item(),
+            "EmbSimilarity/Mean (higher is worse)": off_diagonal_elements.mean().item(),
+            "EmbSimilarity/Max (higher is worse)": off_diagonal_elements.max().item(),
+            "EmbSimilarity/Min (higher is worse)": off_diagonal_elements.min().item(),
+            "EmbSimilarity/Std (higher is worse)": off_diagonal_elements.std().item(),
         })
         
         return cl_loss_converged

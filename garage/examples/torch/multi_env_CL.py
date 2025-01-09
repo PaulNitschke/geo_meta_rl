@@ -66,6 +66,7 @@ default_config={
 
 custom_config={
     "num_train_tasks": 4,
+    "weight_embedding_loss_continuity": 0.5
 }
 
 config = {**default_config, **custom_config}
@@ -97,7 +98,8 @@ def CL_point_env(ctxt=None,
                              embedding_mini_batch_size=config["embedding_mini_batch_size"],
                              reward_scale=config["reward_scale"],
                              max_episode_length=config["max_episode_length"],
-                             use_gpu=config["use_gpu"]):
+                             use_gpu=config["use_gpu"],
+                             weight_embedding_loss_continuity=config["weight_embedding_loss_continuity"]):
     """Train PEARL with ML1 environments.
 
     Args:
@@ -180,6 +182,7 @@ def CL_point_env(ctxt=None,
         num_test_tasks=num_test_tasks,
         latent_dim=latent_size,
         n_negative_samples=n_negative_samples,
+        weight_embedding_loss_continuity=weight_embedding_loss_continuity,
         encoder_hidden_sizes=encoder_hidden_sizes,
         test_env_sampler=test_env_sampler,
         meta_batch_size=meta_batch_size,
