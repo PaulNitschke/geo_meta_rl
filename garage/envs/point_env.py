@@ -195,7 +195,8 @@ class PointEnv(Environment):
                 point in 2D space.
 
         """
-        angles = np.linspace(0, 2 * np.pi, num_tasks, endpoint=False)
+        # angles = np.linspace(0, 2 * np.pi, num_tasks, endpoint=False)
+        angles = np.random.uniform(0, 2 * np.pi, num_tasks)
         radius=2
         x = radius * np.cos(angles)
         y = radius * np.sin(angles)
