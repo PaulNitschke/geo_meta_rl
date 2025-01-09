@@ -42,15 +42,15 @@ from garage.envs import normalize, PointEnv
 
 default_config={
     "seed": 1,
-    "num_epochs": 5,
+    "num_epochs": 10,
     "num_train_tasks": 2,
     "num_test_tasks": 5,
-    "latent_size": 5,
+    "latent_size": 2,
     "encoder_hidden_size": 256,
     "net_size": 256,
     "n_negative_samples": 12,
     "meta_batch_size": 32,
-    "num_steps_per_epoch": 15,
+    "num_steps_per_epoch": 5,
     "num_initial_steps": 1200,
     "num_tasks_sample": 5,
     "num_steps_prior": 500,
@@ -61,12 +61,12 @@ default_config={
     "reward_scale": 10.,
     "max_episode_length": 200,
     "use_gpu": False,
+    "weight_embedding_loss_continuity": None
 }
 
 custom_config={
-    "num_steps_per_epoch": 5,
-    "num_epochs": 10,
-    "latent_dim": 2
+    "num_train_tasks": 4,
+    "weight_embedding_loss_continuity": 0.1
 }
 
 config = {**default_config, **custom_config}

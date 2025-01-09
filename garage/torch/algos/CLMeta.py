@@ -108,6 +108,7 @@ class CLMETA(MetaRLAlgorithm):
             encoder_hidden_sizes,
             test_env_sampler,
             n_negative_samples,
+            weight_embedding_loss_continuity = None,
             policy_class=CLContextConditionedPolicy,
             encoder_class=MLPEncoder,
             policy_lr=3E-4,
@@ -152,6 +153,7 @@ class CLMETA(MetaRLAlgorithm):
         self._use_information_bottleneck = use_information_bottleneck
         self._use_next_obs_in_context = use_next_obs_in_context
         self._n_negative_samples = n_negative_samples
+        self._weight_embedding_loss_continuity = weight_embedding_loss_continuity
 
         self._meta_batch_size = meta_batch_size
         self._num_steps_per_epoch = num_steps_per_epoch
@@ -186,11 +188,12 @@ class CLMETA(MetaRLAlgorithm):
                                               worker_class=PEARLWorker, 
                                               worker_args=worker_args, 
                                               n_test_tasks=num_train_tasks,
-                                              prefix="MetaTrain")
+                                              prefix="EvaluationTrain")
         self._test_evaluator = MetaEvaluator(test_task_sampler=test_env_sampler,
                                         worker_class=PEARLWorker,
                                         worker_args=worker_args,
-                                        n_test_tasks=num_test_tasks)
+                                        n_test_tasks=num_test_tasks,
+                                        prefix="EvaluationTest")
 
         encoder_spec = self.get_env_spec(self._single_env, latent_dim,
                                          'encoder')
@@ -283,6 +286,7 @@ class CLMETA(MetaRLAlgorithm):
 
         """
         self._previous_task_embedding = None
+        self._previous_z = None
         for _ in trainer.step_epochs():
             epoch = trainer.step_itr / self._num_steps_per_epoch
 
@@ -329,19 +333,17 @@ class CLMETA(MetaRLAlgorithm):
                     cl_loss_converged = self._did_cl_loss_converge(indices)
                 idx_cont_loss += 1
             logger.log('Pre-Training Encoder Done...')
-            self._optimize_contrastive_loss(indices, log_mean_task_embeddings=True)
 
             logger.log('Training...')
             self._train_once()
         
             trainer.step_itr += 1
 
-            logger.log('Evaluating...')
             # evaluate
+            logger.log('Evaluating...')
             self._policy.reset_belief()
             self._train_evaluator.evaluate(self)
             self._test_evaluator.evaluate(self)
-            # self._evaluator.evaluate(self)
 
     def _train_once(self):
         """Perform one iteration of training."""
@@ -363,7 +365,7 @@ class CLMETA(MetaRLAlgorithm):
                 prev_cont_loss = cont_loss
                 idx_cont_loss += 1
 
-            self._optimize_contrastive_loss(indices, log_mean_task_embeddings=True)
+            self._optimize_contrastive_loss(indices)
             self.epoch_cont_loss = 0
 
             #Train Policy.
@@ -371,9 +373,7 @@ class CLMETA(MetaRLAlgorithm):
                 self._optimize_policy(indices)
             self._optimize_policy(indices, log_diagnostics=True) #TODO, change back to true
 
-    def _optimize_contrastive_loss(self, indices, 
-                                   step_optimizer=True,
-                                   log_mean_task_embeddings=False):
+    def _optimize_contrastive_loss(self, indices):
         """Perform one iteration of training the embedding function via Contrastive Learning."""
         context = self._sample_context(indices)
         self._policy.infer_posterior(context)
@@ -392,25 +392,55 @@ class CLMETA(MetaRLAlgorithm):
             neg_context = self._sample_context(neg_task_indices)
             self._policy.infer_posterior(neg_context)
             neg_z_list.append(self._policy.z)
-            # neg_z_list.append(F.normalize(self._policy.z, p=2, dim=1))
         neg_z = torch.stack(neg_z_list, dim=0)
-        cont_loss = self._policy.compute_contrastive_loss(self.current_z, pos_z, neg_z)    
-        cont_loss.backward(retain_graph=True)
+        cont_loss = self._policy.compute_contrastive_loss(self.current_z, pos_z, neg_z)
+
+        # Penalty to ensure that the embedding doesn't change too much between episodes
+        if self._previous_z is not None and self._weight_embedding_loss_continuity is not None:
+            breakpoint = True
+            _embedding_loss_continuity = torch.cosine_similarity(self.current_z, self._previous_z).mean()
+
+            total_cont_loss = cont_loss + self._weight_embedding_loss_continuity * _embedding_loss_continuity
+            wandb.log({
+                "Emb/TotalContrastiveLoss": total_cont_loss.item(),
+                "Emb/MeanContrastiveLoss": cont_loss.item(),
+                "Emb/EmbeddingLossContinuity": _embedding_loss_continuity.item()
+            })
+            self._previous_z = self.current_z
+        else:
+            total_cont_loss = cont_loss
+            wandb.log({
+                "Emb/TotalContrastiveLoss": total_cont_loss.item(),
+                "Emb/MeanContrastiveLoss": cont_loss.item()
+            })
+
+        # Update the embedding
+        total_cont_loss.backward(retain_graph=True)
         self.epoch_cont_loss += cont_loss.item()
-        if step_optimizer:
-            self.context_optimizer.step()
-        if log_mean_task_embeddings:
-            mean_task_embeddings = self._compute_mean_embedding(indices)
-            self._did_cl_loss_converge(indices)
-            if self._previous_task_embedding is not None:
-                wandb.log({
-                    "TaskEmbeddingOverEpisodes/MeanTaskEmbeddingChange": torch.cosine_similarity(mean_task_embeddings, self._previous_task_embedding).mean().item(),
-                    "TaskEmbeddingOverEpisodes/MaxTaskEmbeddingChange": torch.cosine_similarity(mean_task_embeddings, self._previous_task_embedding).max().item(),
-                    "TaskEmbeddingOverEpisodes/MinTaskEmbeddingChange": torch.cosine_similarity(mean_task_embeddings, self._previous_task_embedding).min().item(),
-                    "TaskEmbedding/MeanContrastiveLoss": cont_loss.item(),
-                    "TaskEmbedding/MeanTaskEmbedding": mean_task_embeddings.detach().cpu().numpy()
-                    })
-            self._previous_task_embedding = mean_task_embeddings
+
+        # Logging
+        mean_task_embeddings = self._compute_mean_embedding(indices)
+        self._did_cl_loss_converge(indices)
+        if self._previous_task_embedding is not None:
+
+            # Logs the change in the embedding relative to the previous episode
+            wandb.log({
+                "EmbEpisodeChange/Mean": torch.cosine_similarity(mean_task_embeddings, self._previous_task_embedding).mean().item(),
+                "EmbEpisodeChange/Max": torch.cosine_similarity(mean_task_embeddings, self._previous_task_embedding).max().item(),
+                "EmbEpisodeChange/Min": torch.cosine_similarity(mean_task_embeddings, self._previous_task_embedding).min().item(),
+                })
+            
+            # Logs the mean embeddings of each task
+            for idx, embedding in enumerate(mean_task_embeddings):
+                table_name = f'Emb/task_{idx}_embeddings'
+                columns= [f'embedding_{i}' for i in range(embedding.shape[0])]
+                table=wandb.Table(data=[embedding.detach().cpu().numpy().tolist()], columns=columns)
+                wandb.log(
+                    {table_name: table}
+                )
+                wandb.run.summary[table_name] = table
+
+        self._previous_task_embedding = mean_task_embeddings
 
         return cont_loss
 
