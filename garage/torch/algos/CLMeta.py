@@ -322,7 +322,6 @@ class CLMETA(MetaRLAlgorithm):
 
             # if epoch==0: #TODO, now always pre-training
             logger.log('Pre-Training Encoder...')
-            self.epoch_cont_loss=0
             indices = np.random.choice(range(self._num_train_tasks),
                         self._meta_batch_size)
             cl_loss_converged=False
@@ -349,7 +348,6 @@ class CLMETA(MetaRLAlgorithm):
         """Perform one iteration of training."""
         N_STEPS = 50
         for _ in range(self._num_steps_per_epoch):
-            self.epoch_cont_loss = 0
             indices = np.random.choice(range(self._num_train_tasks),
                                        self._meta_batch_size)
             
@@ -366,12 +364,10 @@ class CLMETA(MetaRLAlgorithm):
                 idx_cont_loss += 1
 
             self._optimize_contrastive_loss(indices)
-            self.epoch_cont_loss = 0
 
             #Train Policy.
             for _ in range(N_STEPS):
                 self._optimize_policy(indices)
-            self._optimize_policy(indices, log_diagnostics=True) #TODO, change back to true
 
     def _optimize_contrastive_loss(self, indices):
         """Perform one iteration of training the embedding function via Contrastive Learning."""
@@ -416,7 +412,6 @@ class CLMETA(MetaRLAlgorithm):
 
         # Update the embedding
         total_cont_loss.backward(retain_graph=True)
-        self.epoch_cont_loss += cont_loss.item()
 
         # Logging
         mean_task_embeddings = self._compute_mean_embedding(indices)
@@ -463,15 +458,15 @@ class CLMETA(MetaRLAlgorithm):
         cl_loss_converged = torch.allclose(off_diagonal_elements, torch.full_like(off_diagonal_elements, -1), atol=0.1)
 
         wandb.log({
-            "TaskEmbeddingRelationship/MeanCosineSimilarity (higher is worse)": off_diagonal_elements.mean().item(),
-            "TaskEmbeddingRelationship/MaxCosineSimilarity (higher is worse)": off_diagonal_elements.max().item(),
-            "TaskEmbeddingRelationship/MinCosineSimilarity (higher is worse)": off_diagonal_elements.min().item(),
-            "TaskEmbeddingRelationship/StdCosineSimilarity (higher is worse)": off_diagonal_elements.std().item(),
+            "EmbRelationship/MeanCosSim (higher is worse)": off_diagonal_elements.mean().item(),
+            "EmbRelationship/MaxCosSim (higher is worse)": off_diagonal_elements.max().item(),
+            "EmbRelationship/MinCosSim (higher is worse)": off_diagonal_elements.min().item(),
+            "EmbRelationship/StdCosSim (higher is worse)": off_diagonal_elements.std().item(),
         })
         
         return cl_loss_converged
 
-    def _optimize_policy(self, indices, log_diagnostics=False):
+    def _optimize_policy(self, indices):
         """Perform algorithm optimizing.
 
         Args:
@@ -549,15 +544,14 @@ class CLMETA(MetaRLAlgorithm):
         policy_loss.backward()
         self._policy_optimizer.step()
 
-        if log_diagnostics:
-            wandb.log({
-                'PolicyTraining/QfLoss': qf_loss.item(),
-                'PolicyTraining/VfLoss': vf_loss.item(),
-                'PolicyTraining/PolicyLoss': policy_loss.item(),
-                'PolicyTraining/MeanQ1Vals': q1.mean().item(),
-                'PolicyTraining/MeanQ2Vals': q2.mean().item(),
-                'PolicyTraining/MeanVVals': v_pred.mean().item()
-            })
+        wandb.log({
+            'PolicyTraining/QfLoss': qf_loss.item(),
+            'PolicyTraining/VfLoss': vf_loss.item(),
+            'PolicyTraining/PolicyLoss': policy_loss.item(),
+            'PolicyTraining/MeanQ1Vals': q1.mean().item(),
+            'PolicyTraining/MeanQ2Vals': q2.mean().item(),
+            'PolicyTraining/MeanVVals': v_pred.mean().item()
+        })
 
     def _obtain_samples(self,
                         trainer,
