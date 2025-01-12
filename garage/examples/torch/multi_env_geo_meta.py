@@ -4,6 +4,7 @@ import click
 import sys
 import os
 import wandb
+import torch
 
 sys.path.append(os.path.abspath(os.getcwd()))
 
@@ -14,10 +15,10 @@ from garage.experiment.deterministic import set_seed
 from garage.experiment.task_sampler import SetTaskSampler
 from garage.sampler import LocalSampler
 from garage.torch import set_gpu_mode
-from garage.torch.algos import CLMETA
+from garage.torch.algos import GeoMeta
 from garage.torch.algos.pearl import PEARLWorker
 from garage.torch.embeddings import MLPEncoder
-from garage.torch.policies import (CLContextConditionedPolicy,
+from garage.torch.policies import (GeoContextConditionedPolicy,
                                    TanhGaussianMLPPolicy)
 from garage.torch.q_functions import ContinuousMLPQFunction
 from garage.trainer import Trainer
@@ -74,14 +75,14 @@ custom_config={
 
 config = {**default_config, **custom_config}
 
-wandb.init(project="CL_point_env",
+wandb.init(project="GeoMeta_PointEnv",
            entity="pnitschke",
            name="_".join(f"{key}:{value}" for key, value in custom_config.items()) if custom_config else "VanillaConfig",
            config=config)
 
 
 @wrap_experiment
-def CL_point_env(ctxt=None,
+def GeoMetaPointEnv(ctxt=None,
                              seed=config["seed"],
                              num_epochs=config["num_epochs"],
                              num_train_tasks=config["num_train_tasks"],
@@ -157,11 +158,11 @@ def CL_point_env(ctxt=None,
     trainer = Trainer(ctxt)
 
     # instantiate networks
-    augmented_env = CLMETA.augment_env_spec(env[0](), latent_size)
+    augmented_env = GeoMeta.augment_env_spec(env[0](), latent_size)
     qf = ContinuousMLPQFunction(env_spec=augmented_env,
                                 hidden_sizes=[net_size, net_size, net_size])
-
-    vf_env = CLMETA.get_env_spec(env[0](), latent_size, 'vf')
+    
+    vf_env = GeoMeta.get_env_spec(env[0](), latent_size, 'vf')
     vf = ContinuousMLPQFunction(env_spec=vf_env,
                                 hidden_sizes=[net_size, net_size, net_size])
 
@@ -174,9 +175,9 @@ def CL_point_env(ctxt=None,
                            n_workers=1,
                            worker_class=PEARLWorker)
 
-    clmeta = CLMETA(
+    clmeta = GeoMeta(
         env=env,
-        policy_class=CLContextConditionedPolicy,
+        policy_class=GeoContextConditionedPolicy,
         encoder_class=MLPEncoder,
         inner_policy=inner_policy,
         qf=qf,
@@ -214,4 +215,4 @@ def CL_point_env(ctxt=None,
     trainer.train(n_epochs=num_epochs, batch_size=batch_size)
 
 
-CL_point_env()
+GeoMetaPointEnv()

@@ -12,6 +12,8 @@ from garage.torch.policies.policy import Policy
 from garage.torch.policies.tanh_gaussian_mlp_policy import (
     TanhGaussianMLPPolicy)
 from garage.torch.policies.cl_context_conditioned_policy import CLContextConditionedPolicy
+from garage.torch.policies.geo_context_conditioned_policy import GeoContextConditionedPolicy
+
 
 __all__ = [
     'CategoricalCNNPolicy',
@@ -22,5 +24,6 @@ __all__ = [
     'Policy',
     'TanhGaussianMLPPolicy',
     'ContextConditionedPolicy',
-    'CLContextConditionedPolicy'
+    'CLContextConditionedPolicy',
+    'GeoContextConditionedPolicy',
 ]

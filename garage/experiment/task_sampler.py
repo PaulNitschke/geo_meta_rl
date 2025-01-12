@@ -131,10 +131,11 @@ class SetTaskSampler(TaskSampler):
 
     """
 
-    def __init__(self, env_constructor, *, env=None, wrapper=None):
+    def __init__(self, env_constructor, *, env=None, wrapper=None, sample_mode=None):
         self._env_constructor = env_constructor
         self._env = env or env_constructor()
         self._wrapper = wrapper
+        self._sample_mode = sample_mode
 
     @property
     def n_tasks(self):
@@ -159,7 +160,7 @@ class SetTaskSampler(TaskSampler):
         """
         return [
             SetTaskUpdate(self._env_constructor, task, self._wrapper)
-            for task in self._env.sample_tasks(n_tasks)
+            for task in self._env.sample_tasks(n_tasks, mode=self._sample_mode)
         ]
 
 
