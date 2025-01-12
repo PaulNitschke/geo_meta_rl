@@ -204,7 +204,7 @@ class PointEnv(Environment):
             angles = np.linspace(0, 2 * math.pi, num_tasks)
         else:
             raise ValueError(f"Mode {mode} not supported. Use 'random' or 'linspace'.")
-        radius=2
+        radius=1
         x = radius * np.cos(angles)
         y = radius * np.sin(angles)
         goals = [np.array([x[i], y[i]]) for i in range(num_tasks)]

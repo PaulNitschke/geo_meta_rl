@@ -198,34 +198,35 @@ class GeoMeta(MetaRLAlgorithm):
                                               worker_class=PEARLWorker, 
                                               worker_args=worker_args, 
                                               n_test_tasks=num_train_tasks,
-                                              prefix="EvaluationTrain")
+                                              prefix="EvaluationTrain",
+                                              hard_coded_embeddings=self._envidx_to_embeddings.values())
         self._test_evaluator = MetaEvaluator(test_task_sampler=test_env_sampler,
                                         worker_class=PEARLWorker,
                                         worker_args=worker_args,
                                         n_test_tasks=num_test_tasks,
-                                        prefix="EvaluationTest")
+                                        prefix="EvaluationTest",
+                                        hard_coded_embeddings=self._envidx_to_embeddings.values())
+
 
         # Encoder, changed to identity function as we directly feed in the ground-truth embeddings. Only valid for circle environment debugging.
         # encoder_spec = self.get_env_spec(self._single_env, latent_dim,
         #                                  'encoder')
         # encoder_in_dim = int(np.prod(encoder_spec.input_space.shape))
         # encoder_out_dim = int(np.prod(encoder_spec.output_space.shape))
-        def identity_w_init(weight):
-            torch.nn.init.eye_(weight)
+        class IdentityEncoder():
+            """Identity encoder for debugging purposes."""
 
-        def zero_b_init(bias):
-            torch.nn.init.zeros_(bias)
-        context_encoder = encoder_class(input_dim=2,
-                                        output_dim=2,
-                                        hidden_sizes=[],
-                                        hidden_nonlinearity=None,
-                                        output_nonlinearity=None,
-                                        hidden_w_init=identity_w_init,
-                                        hidden_b_init=zero_b_init,
-                                        output_w_init=identity_w_init,
-                                        output_b_init=zero_b_init,
-                                        layer_normalization=False
-                                        )
+            def __init__(self):
+                self.output_dim=2
+
+            def forward(self, x):
+                return x
+
+            def reset(self):
+                """Resets the encoder. This method is a placeholder for compatibility."""
+                pass
+
+        context_encoder=IdentityEncoder()
 
         self._policy = policy_class(
             latent_dim=latent_dim,
@@ -264,10 +265,11 @@ class GeoMeta(MetaRLAlgorithm):
             self._vf.parameters(),
             lr=vf_lr,
         )
-        self.context_optimizer = optimizer_class(
-            self._policy.networks[0].parameters(),
-            lr=context_lr,
-        )
+        #TODO, removed for hard-coded embeddings.
+        # self.context_optimizer = optimizer_class(
+        #     self._policy.networks[0].parameters(),
+        #     lr=context_lr,
+        # )
 
     def __getstate__(self):
         """Object.__getstate__.
@@ -493,7 +495,7 @@ class GeoMeta(MetaRLAlgorithm):
 
     def _map_task_index_to_embedding(self, idx):
         """Map task index to ground-truth embeddings. Only valid for Point Environment."""
-        return torch.tensor(self._env_copy[idx]._make_env().reset()[1]["goal"])
+        return torch.tensor(self._env_copy[idx]._make_env().reset()[1]["goal"], dtype=torch.float32)
 
     def _optimize_policy(self, indices):
         """Perform algorithm optimizing.
@@ -508,7 +510,7 @@ class GeoMeta(MetaRLAlgorithm):
         context = np.array(indices).reshape(num_tasks, 1)
         context = np.repeat(context, self._embedding_batch_size, axis=1)
         context = context[:,:, np.newaxis]
-        context = np_to_torch(context, device=global_device())
+        context = np_to_torch(context)
         X, N, _ = context.shape
         flattened_input = context.view(-1)
         mapped_values = torch.stack([self._envidx_to_embeddings[int(key.item())] for key in flattened_input])
@@ -646,8 +648,15 @@ class GeoMeta(MetaRLAlgorithm):
                 if add_to_enc_buffer:
                     self._context_replay_buffers[self._task_idx].add_path(p)
 
-            if update_posterior_rate != np.inf:
-                context = self._sample_context(self._task_idx)
+            if update_posterior_rate != np.inf: #TODO, changed encoding to use hard-coded ground-truth encoding from circle.
+                # context = self._sample_context(self._task_idx)
+                context = np.array(self._task_idx)
+                context = np.repeat(context, self._embedding_batch_size, axis=0)
+                context = context[:, np.newaxis]
+                context = np_to_torch(context)
+                flattened_input = context.view(-1)
+                mapped_values = torch.stack([self._envidx_to_embeddings[int(key.item())] for key in flattened_input])
+                context = mapped_values.view(1, 1, self._embedding_batch_size, 2)
                 self._policy.infer_posterior(context)
 
     def _sample_data(self, indices):
