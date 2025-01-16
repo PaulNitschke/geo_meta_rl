@@ -119,10 +119,12 @@ class MetaEvaluator:
                                                 env_up)
                 for _ in range(self._n_exploration_eps)
             ])
-            adapted_policy = algo.adapt_policy(policy, eps)
-            if self._hard_coded_embeddings is not None:
+            if self._hard_coded_embeddings is None:
+                adapted_policy = algo.adapt_policy(policy, eps)
+            else:
+                adapted_policy = algo.policy
                 adapted_policy.z = self._hard_coded_embeddings[idx_env_up]
-            task_embedding = algo.policy.z.detach().cpu().numpy()
+            task_embedding = adapted_policy.z.detach().cpu().numpy()
             task_embeddings.append(task_embedding)
             adapted_eps = self._test_sampler.obtain_samples(
                 self._eval_itr,
@@ -169,7 +171,7 @@ class MetaEvaluator:
         ax.set_aspect('equal', adjustable='box')
         
         # Plot circle
-        circle = plt.Circle((0, 0), 2, color='r', fill=False, linestyle='--')
+        circle = plt.Circle((0, 0), 1, color='r', fill=False, linestyle='--')
         ax.add_artist(circle)
         
         # Set plot limits

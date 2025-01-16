@@ -43,7 +43,7 @@ from garage.envs import normalize, PointEnv
 
 default_config={
     "seed": 1,
-    "num_epochs": 10,
+    "num_epochs": 50,
     "num_train_tasks": 2,
     "num_test_tasks": 5,
     "latent_size": 2,
@@ -69,8 +69,8 @@ default_config={
 }
 
 custom_config={
-    "num_train_tasks": 4,
-    "n_policy_optimization_steps": 20,
+    "reward_scale": 3,
+    "num_train_tasks": 1
 }
 
 config = {**default_config, **custom_config}

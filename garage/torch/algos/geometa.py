@@ -194,18 +194,19 @@ class GeoMeta(MetaRLAlgorithm):
                              'test_env_sampler.n_tasks is None')
 
         worker_args = dict(deterministic=True, accum_context=True)
+        hard_coded_embeddings=[emb.unsqueeze(0) for emb in list(self._envidx_to_embeddings.values())]
         self._train_evaluator = MetaEvaluator(test_tasks=env, 
                                               worker_class=PEARLWorker, 
                                               worker_args=worker_args, 
                                               n_test_tasks=num_train_tasks,
                                               prefix="EvaluationTrain",
-                                              hard_coded_embeddings=self._envidx_to_embeddings.values())
-        self._test_evaluator = MetaEvaluator(test_task_sampler=test_env_sampler,
-                                        worker_class=PEARLWorker,
-                                        worker_args=worker_args,
-                                        n_test_tasks=num_test_tasks,
-                                        prefix="EvaluationTest",
-                                        hard_coded_embeddings=self._envidx_to_embeddings.values())
+                                              hard_coded_embeddings=hard_coded_embeddings)
+        # self._test_evaluator = MetaEvaluator(test_task_sampler=test_env_sampler,
+        #                                 worker_class=PEARLWorker,
+        #                                 worker_args=worker_args,
+        #                                 n_test_tasks=num_test_tasks,
+        #                                 prefix="EvaluationTest",
+        #                                 hard_coded_embeddings=list(self._envidx_to_embeddings.values()))
 
 
         # Encoder, changed to identity function as we directly feed in the ground-truth embeddings. Only valid for circle environment debugging.
@@ -368,7 +369,7 @@ class GeoMeta(MetaRLAlgorithm):
             logger.log('Evaluating...')
             # self._policy.reset_belief()
             self._train_evaluator.evaluate(self)
-            self._test_evaluator.evaluate(self)
+            # self._test_evaluator.evaluate(self)
 
     def _train_once(self):
         """Perform one iteration of training."""
@@ -521,7 +522,7 @@ class GeoMeta(MetaRLAlgorithm):
 
         # data shape is (task, batch, feat)
         obs, actions, rewards, next_obs, terms = self._sample_data(indices)
-        policy_outputs, task_z = self._policy(obs, context)
+        policy_outputs, task_z = self._policy(obs, context) #TODO, feed in other context here but same states to get policy for other tasks
         new_actions, policy_mean, policy_log_std, log_pi = policy_outputs[:4]
 
         # flatten out the task dimension
@@ -531,7 +532,7 @@ class GeoMeta(MetaRLAlgorithm):
         next_obs = next_obs.view(t * b, -1)
 
         # optimize qf and encoder networks
-        q1_pred = self._qf1(torch.cat([obs, actions], dim=1), task_z)
+        q1_pred = self._qf1(torch.cat([obs, actions], dim=1), task_z) #TODO, feed in existing obs but actions and embeddings for non-training dist. tasks
         q2_pred = self._qf2(torch.cat([obs, actions], dim=1), task_z)
         v_pred = self._vf(obs, task_z.detach())
 
@@ -543,11 +544,11 @@ class GeoMeta(MetaRLAlgorithm):
         zero_optim_grads(self.qf1_optimizer)
         zero_optim_grads(self.qf2_optimizer)
 
-        rewards_flat = rewards.view(self._batch_size * num_tasks, -1)
+        rewards_flat = rewards.view(self._batch_size * num_tasks, -1) #TODO, transport rewards across manifold to other training tasks
         rewards_flat = rewards_flat * self._reward_scale
         terms_flat = terms.view(self._batch_size * num_tasks, -1)
         q_target = rewards_flat + (
-            1. - terms_flat) * self._discount * target_v_values
+            1. - terms_flat) * self._discount * target_v_values #TODO, compute this for both training distribution samples and non-training tasks
         qf_loss = torch.mean((q1_pred - q_target)**2) + torch.mean(
             (q2_pred - q_target)**2)
         qf_loss.backward()
@@ -556,7 +557,7 @@ class GeoMeta(MetaRLAlgorithm):
         self.qf2_optimizer.step()
 
         # compute min Q on the new actions
-        q1 = self._qf1(torch.cat([obs, new_actions], dim=1), task_z.detach())
+        q1 = self._qf1(torch.cat([obs, new_actions], dim=1), task_z.detach()) #TODO, compute this again on all tasks
         q2 = self._qf2(torch.cat([obs, new_actions], dim=1), task_z.detach())
         min_q = torch.min(q1, q2)
 
@@ -701,7 +702,7 @@ class GeoMeta(MetaRLAlgorithm):
 
         return o, a, r, no, d
 
-    def _sample_context(self, indices): #TODO, maybe we need this
+    def _sample_context(self, indices):
         """Sample batch of context from a list of tasks.
 
         Args:

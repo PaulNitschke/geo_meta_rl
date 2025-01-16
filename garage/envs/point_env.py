@@ -185,7 +185,7 @@ class PointEnv(Environment):
     # pylint: disable=no-self-use
     def sample_tasks(self, 
                      num_tasks,
-                     mode: str = 'random'):
+                     mode: str = 'linspace'):
         """Sample a list of `num_tasks` tasks. Tasks are uniformly distributed on circle with radius 2.
 
         Args:
@@ -198,10 +198,10 @@ class PointEnv(Environment):
                 point in 2D space.
 
         """
-        if mode=="random" or mode==None:
+        if mode=="random":
             angles = np.random.uniform(0, 2 * math.pi, num_tasks)
-        elif mode=="linspace":
-            angles = np.linspace(0, 2 * math.pi, num_tasks)
+        elif mode=="linspace" or mode==None:
+            angles = np.linspace(0, 2 * math.pi, num_tasks, endpoint=False)
         else:
             raise ValueError(f"Mode {mode} not supported. Use 'random' or 'linspace'.")
         radius=1
