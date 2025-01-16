@@ -65,8 +65,7 @@ default_config={
 }
 
 custom_config={
-    "num_train_tasks": 4,
-    "weight_embedding_loss_continuity": 0.5
+    "num_train_tasks": 1,
 }
 
 config = {**default_config, **custom_config}
