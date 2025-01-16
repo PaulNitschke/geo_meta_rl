@@ -322,16 +322,17 @@ class CLMETA(MetaRLAlgorithm):
 
             # if epoch==0: #TODO, now always pre-training
             logger.log('Pre-Training Encoder...')
-            indices = np.random.choice(range(self._num_train_tasks),
-                        self._meta_batch_size)
-            cl_loss_converged=False
-            idx_cont_loss = 0
-            while not cl_loss_converged and idx_cont_loss < 250:
-                self._optimize_contrastive_loss(indices)
-                if idx_cont_loss % 50 == 0: #TODO, this check is only valid if the global CL optimum (e.g. orthogonal embeddings) can be achieved. need to change this later.
-                    cl_loss_converged = self._did_cl_loss_converge(indices)
-                idx_cont_loss += 1
-            logger.log(f'Pre-Training Encoder Done after {idx_cont_loss} steps...')
+            if self._num_train_tasks > 1:
+                indices = np.random.choice(range(self._num_train_tasks),
+                            self._meta_batch_size)
+                cl_loss_converged=False
+                idx_cont_loss = 0
+                while not cl_loss_converged and idx_cont_loss < 250:
+                    self._optimize_contrastive_loss(indices)
+                    if idx_cont_loss % 50 == 0: #TODO, this check is only valid if the global CL optimum (e.g. orthogonal embeddings) can be achieved. need to change this later.
+                        cl_loss_converged = self._did_cl_loss_converge(indices)
+                    idx_cont_loss += 1
+                logger.log(f'Pre-Training Encoder Done after {idx_cont_loss} steps...')
 
             logger.log('Training...')
             self._train_once()
@@ -352,16 +353,17 @@ class CLMETA(MetaRLAlgorithm):
                                        self._meta_batch_size)
             
             #Train Embedding.
-            prev_cont_loss = torch.inf
-            idx_cont_loss = 0
-            cl_loss_converged=False
-            while not cl_loss_converged and idx_cont_loss<200: #TODO, changed from 200
-                cont_loss=self._optimize_contrastive_loss(indices)
-                if torch.abs(cont_loss-prev_cont_loss)<1e-3:
-                    cl_loss_converged=True
-                    idx_cont_loss = 0
-                prev_cont_loss = cont_loss
-                idx_cont_loss += 1
+            if self._num_train_tasks >1:
+                prev_cont_loss = torch.inf
+                idx_cont_loss = 0
+                cl_loss_converged=False
+                while not cl_loss_converged and idx_cont_loss<200: #TODO, changed from 200
+                    cont_loss=self._optimize_contrastive_loss(indices)
+                    if torch.abs(cont_loss-prev_cont_loss)<1e-3:
+                        cl_loss_converged=True
+                        idx_cont_loss = 0
+                    prev_cont_loss = cont_loss
+                    idx_cont_loss += 1
 
 
             #Train Policy.
@@ -370,6 +372,8 @@ class CLMETA(MetaRLAlgorithm):
 
     def _optimize_contrastive_loss(self, indices):
         """Perform one iteration of training the embedding function via Contrastive Learning."""
+        if self._num_train_tasks==1:
+            return
         context = self._sample_context(indices)
         self._policy.infer_posterior(context)
         # self.current_z = F.normalize(self._policy.z, p=2, dim=1)
