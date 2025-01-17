@@ -198,7 +198,15 @@ class GEOMeta(MetaRLAlgorithm):
                                               worker_args=worker_args, 
                                               n_test_tasks=num_train_tasks,
                                               prefix="EvaluationTrain",
-                                              hard_coded_embeddings=hard_coded_embeddings)
+                                            #   hard_coded_embeddings=hard_coded_embeddings
+                                              )
+        self._train_evaluator2 = MetaEvaluator(test_tasks=env, 
+                                              worker_class=PEARLWorker, 
+                                              worker_args=worker_args, 
+                                              n_test_tasks=num_train_tasks,
+                                              prefix="EvaluationTrain2",
+                                              hard_coded_embeddings=hard_coded_embeddings
+                                              )
         # self._test_evaluator = MetaEvaluator(test_task_sampler=test_env_sampler,
         #                                 worker_class=PEARLWorker,
         #                                 worker_args=worker_args,
@@ -354,6 +362,7 @@ class GEOMeta(MetaRLAlgorithm):
             logger.log('Evaluating...')
             self._policy.reset_belief()
             self._train_evaluator.evaluate(self)
+            self._train_evaluator2.evaluate(self)
             # self._test_evaluator.evaluate(self)
 
     def _train_once(self):

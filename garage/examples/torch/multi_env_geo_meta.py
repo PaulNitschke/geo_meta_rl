@@ -66,7 +66,6 @@ default_config={
 
 custom_config={
     "num_train_tasks": 1,
-    "latent_size": 6
 }
 
 config = {**default_config, **custom_config}

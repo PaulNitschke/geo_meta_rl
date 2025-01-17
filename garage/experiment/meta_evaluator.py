@@ -125,7 +125,7 @@ class MetaEvaluator:
             else:
                 adapted_policy = copy.deepcopy(policy)                
                 adapted_policy.z = self._hard_coded_embeddings[idx_env_up]
-            task_embedding = algo.policy.z.detach().cpu().numpy()
+            task_embedding = adapted_policy.z.detach().cpu().numpy()
             task_embeddings.append(task_embedding)
             adapted_eps = self._test_sampler.obtain_samples(
                 self._eval_itr,
