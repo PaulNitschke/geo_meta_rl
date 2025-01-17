@@ -18,8 +18,9 @@ from garage.torch.algos.sac import SAC
 from garage.torch.algos.mtsac import MTSAC
 from garage.torch.algos.pearl import PEARL
 from garage.torch.algos.CLMeta import CLMETA
+from garage.torch.algos.GeoMeta import GEOMeta
 
 __all__ = [
     'BC', 'DDPG', 'DQN', 'VPG', 'PPO', 'TD3', 'TRPO', 'MAMLPPO', 'MAMLTRPO',
-    'MAMLVPG', 'MTSAC', 'PEARL', 'SAC', 'CLMETA'
+    'MAMLVPG', 'MTSAC', 'PEARL', 'SAC', 'CLMETA', 'GEOMeta'
 ]

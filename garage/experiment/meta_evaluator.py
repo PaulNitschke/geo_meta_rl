@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 from io import BytesIO
+import copy
 
 from garage import EpisodeBatch, log_multitask_performance
 from garage.experiment.deterministic import get_seed
@@ -119,8 +120,10 @@ class MetaEvaluator:
                                                 env_up)
                 for _ in range(self._n_exploration_eps)
             ])
-            adapted_policy = algo.adapt_policy(policy, eps)
-            if self._hard_coded_embeddings is not None:
+            if self._hard_coded_embeddings is None:
+                adapted_policy = algo.adapt_policy(policy, eps)
+            else:
+                adapted_policy = copy.deepcopy(policy)                
                 adapted_policy.z = self._hard_coded_embeddings[idx_env_up]
             task_embedding = algo.policy.z.detach().cpu().numpy()
             task_embeddings.append(task_embedding)
