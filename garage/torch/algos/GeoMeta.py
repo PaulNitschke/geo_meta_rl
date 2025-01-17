@@ -179,7 +179,12 @@ class GeoMeta(MetaRLAlgorithm):
         for idx_env, _ in enumerate(self._env):
             self._envidx_to_embeddings[idx_env] = self._map_task_index_to_embedding(idx_env)
 
-
+        # Tasks for which we do the parallel transport.
+        self._test_env = test_env_sampler.sample(num_test_tasks)
+        self._testenvidx_to_embeddings = {}
+        for idx_env, _ in enumerate(self._test_env):
+            self._testenvidx_to_embeddings[idx_env] = self._map_task_index_to_embedding(idx_env)
+        
         self._sampler = sampler
 
         self._is_resuming = False
@@ -200,11 +205,15 @@ class GeoMeta(MetaRLAlgorithm):
                                               prefix="EvaluationTrain",
                                               hard_coded_embeddings=hard_coded_embeddings
                                               )
-        # self._test_evaluator = MetaEvaluator(test_task_sampler=test_env_sampler,
-        #                                 worker_class=PEARLWorker,
-        #                                 worker_args=worker_args,
-        #                                 n_test_tasks=num_test_tasks,
-        #                                 prefix="EvaluationTest")
+        
+        hard_coded_test_embeddings=[emb.unsqueeze(0) for emb in list(self._testenvidx_to_embeddings.values())]
+        self._test_evaluator = MetaEvaluator(test_tasks=self._test_env,
+                                        worker_class=PEARLWorker,
+                                        worker_args=worker_args,
+                                        n_test_tasks=num_test_tasks,
+                                        prefix="EvaluationTest",
+                                        hard_coded_embeddings=hard_coded_test_embeddings
+                                        )
 
         encoder_spec = self.get_env_spec(self._single_env, latent_dim,
                                          'encoder')
@@ -502,6 +511,13 @@ class GeoMeta(MetaRLAlgorithm):
         """Map task index to ground-truth embeddings. Only valid for Point Environment."""
         return torch.tensor(self._env_copy[idx]._make_env().reset()[1]["goal"], dtype=torch.float32)
 
+    def transport_reward_batch(self, states, actions, target_task_idx):
+        a = torch.clamp(actions, -0.1, 0.1)
+        next_states = torch.clamp(states[:, :2] + a, -5, 5)
+        target_embeddings = self._testenvidx_to_embeddings[target_task_idx].unsqueeze(0)
+        dist = torch.norm(next_states - target_embeddings, dim=1)
+        return -dist
+
     def _optimize_policy(self, indices):
         """Perform algorithm optimizing.
 
@@ -531,15 +547,57 @@ class GeoMeta(MetaRLAlgorithm):
         obs, actions, rewards, next_obs, terms = self._sample_data(indices)
         policy_outputs, task_z = self._policy(obs, context)
         new_actions, policy_mean, policy_log_std, log_pi = policy_outputs[:4]
-        # assert np.isclose(task_z.detach().cpu().numpy(), np.array([-0.8671, 0.4981]), atol=1e-3).all() or np.isclose(task_z.detach().cpu().numpy(), np.array([0, 0]), atol=1e-3).all(), "self.z: {}".format(self.z.detach().cpu().numpy())
+
+        #Parallel transport sampled trajectories to test tasks
+        t, b, _ = obs.size()
+        transported_obs = obs.clone().detach()
+        transported_actions = actions.clone().detach()
+        transported_next_obs = next_obs.clone().detach()
+        transported_task_z = self._testenvidx_to_embeddings[0].unsqueeze(0).unsqueeze(0).repeat(t, b, 1)
+        transported_policy_outputs, _ = self._policy(transported_obs, transported_task_z)
+        transported_new_actions, transported_policy_mean, transported_policy_log_std, transported_log_pi = transported_policy_outputs[:4]
+        transported_obs = transported_obs.view(t * b, -1)
+        transported_actions = transported_actions.view(t * b, -1)
+        transported_rewards = self.transport_reward_batch(transported_obs.detach(),
+                                                            transported_actions.detach(),
+                                                            target_task_idx=0
+                                                        ).unsqueeze(1)
+        transported_next_obs = next_obs.clone().detach()
+        transported_terms = terms #TODO, this we can't really know, no?
+
 
         # flatten out the task dimension
         t, b, _ = obs.size()
         obs = obs.view(t * b, -1)
         actions = actions.view(t * b, -1)
         next_obs = next_obs.view(t * b, -1)
+        rewards_flat = rewards.view(self._batch_size * num_tasks, -1)
+        rewards_flat = rewards_flat * self._reward_scale
+        terms_flat = terms.view(self._batch_size * num_tasks, -1)
+
+        transported_obs_flat = transported_obs.view(t * b, -1)
+        transported_actions_flat = transported_new_actions.view(t * b, -1)
+        transported_task_z_flat = transported_task_z.view(t * b, -1)
+        transported_next_obs_flat = transported_next_obs.view(t * b, -1)
+        transported_rewards_flat = transported_rewards.view(t * b, -1)
+        transported_rewards_flat = transported_rewards_flat * self._reward_scale
+        transported_terms_flat = transported_terms.view(t * b, -1)
+
+
+        # append transported trajectories to the original trajectories, after this no more changes to SAC
+        obs = torch.cat([obs, transported_obs_flat], dim=0)
+        actions = torch.cat([actions, transported_actions_flat], dim=0)
+        new_actions = torch.cat([new_actions, transported_new_actions], dim=0)
+        task_z = torch.cat([task_z, transported_task_z_flat], dim=0)
+        next_obs = torch.cat([next_obs, transported_next_obs_flat], dim=0)
+        rewards_flat = torch.cat([rewards_flat, transported_rewards_flat], dim=0)
+        terms_flat = torch.cat([terms_flat, transported_terms_flat], dim=0)
+        policy_mean = np.vstack([policy_mean, transported_policy_mean])
+        policy_log_std = np.vstack([policy_log_std, transported_policy_log_std])
+        log_pi = torch.cat([log_pi, transported_log_pi], dim=0)
 
         # optimize qf and encoder networks
+        #TODO, concat sampled trajectories and transported trajectories
         q1_pred = self._qf1(torch.cat([obs, actions], dim=1), task_z)
         q2_pred = self._qf2(torch.cat([obs, actions], dim=1), task_z)
         v_pred = self._vf(obs, task_z.detach())
@@ -552,9 +610,7 @@ class GeoMeta(MetaRLAlgorithm):
         zero_optim_grads(self.qf1_optimizer)
         zero_optim_grads(self.qf2_optimizer)
 
-        rewards_flat = rewards.view(self._batch_size * num_tasks, -1)
-        rewards_flat = rewards_flat * self._reward_scale
-        terms_flat = terms.view(self._batch_size * num_tasks, -1)
+
         q_target = rewards_flat + (
             1. - terms_flat) * self._discount * target_v_values
         qf_loss = torch.mean((q1_pred - q_target)**2) + torch.mean(

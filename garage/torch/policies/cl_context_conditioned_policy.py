@@ -144,7 +144,6 @@ class CLContextConditionedPolicy(nn.Module):
             self.z_vars = torch.stack([p[1] for p in z_params])
         else:
             self.z_means = torch.mean(params, dim=1)
-        # self.z_means = torch.ones_like(self.z_means) #TODO, hard-coded task identity
         self.sample_from_belief()
 
     # pylint: disable=arguments-differ
