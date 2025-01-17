@@ -14,8 +14,8 @@ from garage.experiment.deterministic import set_seed
 from garage.experiment.task_sampler import SetTaskSampler
 from garage.sampler import LocalSampler
 from garage.torch import set_gpu_mode
-from garage.torch.algos import GEOMeta
-from garage.torch.algos.GeoMeta import PEARLWorker
+from garage.torch.algos import GeoMeta
+from garage.torch.algos.geometa import PEARLWorker
 from garage.torch.embeddings import MLPEncoder
 from garage.torch.policies import (CLContextConditionedPolicy,
                                    TanhGaussianMLPPolicy)
@@ -65,7 +65,7 @@ default_config={
 }
 
 custom_config={
-    "num_train_tasks": 1,
+    "num_train_tasks": 2,
     }
 
 config = {**default_config, **custom_config}
@@ -151,11 +151,11 @@ def CL_point_env(ctxt=None,
     trainer = Trainer(ctxt)
 
     # instantiate networks
-    augmented_env = GEOMeta.augment_env_spec(env[0](), latent_size)
+    augmented_env = GeoMeta.augment_env_spec(env[0](), latent_size)
     qf = ContinuousMLPQFunction(env_spec=augmented_env,
                                 hidden_sizes=[net_size, net_size, net_size])
 
-    vf_env = GEOMeta.get_env_spec(env[0](), latent_size, 'vf')
+    vf_env = GeoMeta.get_env_spec(env[0](), latent_size, 'vf')
     vf = ContinuousMLPQFunction(env_spec=vf_env,
                                 hidden_sizes=[net_size, net_size, net_size])
 
@@ -168,7 +168,7 @@ def CL_point_env(ctxt=None,
                            n_workers=1,
                            worker_class=PEARLWorker)
 
-    geometa = GEOMeta(
+    geometa = GeoMeta(
         env=env,
         policy_class=CLContextConditionedPolicy,
         encoder_class=MLPEncoder,

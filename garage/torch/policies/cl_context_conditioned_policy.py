@@ -89,11 +89,7 @@ class CLContextConditionedPolicy(nn.Module):
             z = [d.rsample() for d in posteriors]
             self.z = F.normalize(torch.stack(z), p=2, dim=1)
         else:
-            # self.z = self.z_means 
             self.z = F.normalize(self.z_means, p=2, dim=1)
-        # self.z = torch.ones_like(self.z) #TODO, hard-coded z
-        if not np.isclose(self.z.detach().cpu().numpy(), np.array([-0.8671, 0.4981]), atol=1e-3).all() and not np.isclose(self.z.detach().cpu().numpy(), np.array([0, 0]), atol=1e-3).all():
-            print("Different embedding!! self.z: {}".format(self.z.detach().cpu().numpy()))
 
     def update_context(self, timestep):
         """Append single transition to the current context.

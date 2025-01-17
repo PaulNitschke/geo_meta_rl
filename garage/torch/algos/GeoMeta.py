@@ -23,7 +23,7 @@ from garage.torch.embeddings import MLPEncoder
 from garage.torch.policies import CLContextConditionedPolicy
 
 
-class GEOMeta(MetaRLAlgorithm):
+class GeoMeta(MetaRLAlgorithm):
     r"""A Meta-RL algorithm that trains the task embedding via Contrastive Learning, otherwise adapted from Pearl.
 
     PEARL, which stands for Probablistic Embeddings for Actor-Critic
@@ -198,13 +198,6 @@ class GEOMeta(MetaRLAlgorithm):
                                               worker_args=worker_args, 
                                               n_test_tasks=num_train_tasks,
                                               prefix="EvaluationTrain",
-                                            #   hard_coded_embeddings=hard_coded_embeddings
-                                              )
-        self._train_evaluator2 = MetaEvaluator(test_tasks=env, 
-                                              worker_class=PEARLWorker, 
-                                              worker_args=worker_args, 
-                                              n_test_tasks=num_train_tasks,
-                                              prefix="EvaluationTrain2",
                                               hard_coded_embeddings=hard_coded_embeddings
                                               )
         # self._test_evaluator = MetaEvaluator(test_task_sampler=test_env_sampler,
@@ -217,7 +210,6 @@ class GEOMeta(MetaRLAlgorithm):
                                          'encoder')
         encoder_in_dim = int(np.prod(encoder_spec.input_space.shape))
         encoder_out_dim = int(np.prod(encoder_spec.output_space.shape))
-        # encoder_out_dim = encoder_in_dim #TODO, hard-coded for point environment
         context_encoder = encoder_class(input_dim=encoder_in_dim,
                                         output_dim=encoder_out_dim,
                                         hidden_sizes=encoder_hidden_sizes)
@@ -356,7 +348,7 @@ class GEOMeta(MetaRLAlgorithm):
 
             # if epoch==0: #TODO, now always pre-training
             logger.log('Pre-Training Encoder...')
-            if self._num_train_tasks > 1:
+            if self._envidx_to_embeddings is None:
                 indices = np.random.choice(range(self._num_train_tasks),
                             self._meta_batch_size)
                 cl_loss_converged=False
@@ -377,7 +369,6 @@ class GEOMeta(MetaRLAlgorithm):
             logger.log('Evaluating...')
             self._policy.reset_belief()
             self._train_evaluator.evaluate(self)
-            self._train_evaluator2.evaluate(self)
             # self._test_evaluator.evaluate(self)
 
     def _train_once(self):
@@ -388,7 +379,7 @@ class GEOMeta(MetaRLAlgorithm):
                                        self._meta_batch_size)
             
             #Train Embedding.
-            if self._num_train_tasks >1:
+            if self._envidx_to_embeddings is None: #no hard-coded embeddings, so we need to train the encoder.
                 prev_cont_loss = torch.inf
                 idx_cont_loss = 0
                 cl_loss_converged=False
@@ -666,11 +657,8 @@ class GEOMeta(MetaRLAlgorithm):
                 if add_to_enc_buffer:
                     self._context_replay_buffers[self._task_idx].add_path(p)
 
-            # if update_posterior_rate != np.inf:
-            #     context = self._sample_context(self._task_idx)
-            #     self._policy.infer_posterior(context) #TODO, update
             if update_posterior_rate != np.inf: #TODO, changed encoding to use hard-coded ground-truth encoding from circle.
-                context = self._sample_context(self._task_idx)
+                # context = self._sample_context(self._task_idx)
                 context = np.array(self._task_idx)
                 context = np.repeat(context, self._embedding_batch_size, axis=0)
                 context = context[:, np.newaxis]
