@@ -221,6 +221,21 @@ class GEOMeta(MetaRLAlgorithm):
         context_encoder = encoder_class(input_dim=encoder_in_dim,
                                         output_dim=encoder_out_dim,
                                         hidden_sizes=encoder_hidden_sizes)
+        
+        class IdentityEncoder():
+            """Identity encoder for debugging purposes."""
+
+            def __init__(self, latent_dim):
+                self.output_dim=latent_dim
+
+            def forward(self, x):
+                return x
+
+            def reset(self):
+                """Resets the encoder. This method is a placeholder for compatibility."""
+                pass
+            
+        context_encoder = IdentityEncoder(latent_dim=self._latent_dim)
 
         self._policy = policy_class(
             latent_dim=latent_dim,
@@ -259,10 +274,10 @@ class GEOMeta(MetaRLAlgorithm):
             self._vf.parameters(),
             lr=vf_lr,
         )
-        self.context_optimizer = optimizer_class(
-            self._policy.networks[0].parameters(),
-            lr=context_lr,
-        )
+        # self.context_optimizer = optimizer_class(
+        #     self._policy.networks[0].parameters(),
+        #     lr=context_lr,
+        # )
 
     def __getstate__(self):
         """Object.__getstate__.
@@ -505,17 +520,18 @@ class GEOMeta(MetaRLAlgorithm):
         """
         num_tasks = len(indices)
         context = self._sample_context(indices)
-        # num_tasks = len(indices)
-        # # context = self._sample_context(indices)
-        # # Hard coded task indices instead of sampling
-        # context = np.array(indices).reshape(num_tasks, 1)
-        # context = np.repeat(context, self._embedding_batch_size, axis=1)
-        # context = context[:,:, np.newaxis]
-        # context = np_to_torch(context)
-        # X, N, _ = context.shape
-        # flattened_input = context.view(-1)
-        # mapped_values = torch.stack([self._envidx_to_embeddings[int(key.item())] for key in flattened_input])
-        # context = mapped_values.view(X, N, 2)
+        num_tasks = len(indices)
+        # context = self._sample_context(indices)
+        # Hard coded task indices instead of sampling
+        context = np.array(indices).reshape(num_tasks, 1)
+        context = np.repeat(context, self._embedding_batch_size, axis=1)
+        context = context[:,:, np.newaxis]
+        context = np_to_torch(context)
+        X, N, _ = context.shape
+        flattened_input = context.view(-1)
+        mapped_values = torch.stack([self._envidx_to_embeddings[int(key.item())] for key in flattened_input])
+        context = mapped_values.view(X, N, 2)
+        context = F.normalize(context, p=2, dim=2) #embeddings are normalized to the unit circle first before we feed them into the policy...
 
         # clear context and reset belief of policy
         self._policy.reset_belief(num_tasks=num_tasks)
@@ -524,6 +540,7 @@ class GEOMeta(MetaRLAlgorithm):
         obs, actions, rewards, next_obs, terms = self._sample_data(indices)
         policy_outputs, task_z = self._policy(obs, context)
         new_actions, policy_mean, policy_log_std, log_pi = policy_outputs[:4]
+        # assert np.isclose(task_z.detach().cpu().numpy(), np.array([-0.8671, 0.4981]), atol=1e-3).all() or np.isclose(task_z.detach().cpu().numpy(), np.array([0, 0]), atol=1e-3).all(), "self.z: {}".format(self.z.detach().cpu().numpy())
 
         # flatten out the task dimension
         t, b, _ = obs.size()
@@ -654,13 +671,14 @@ class GEOMeta(MetaRLAlgorithm):
             #     self._policy.infer_posterior(context) #TODO, update
             if update_posterior_rate != np.inf: #TODO, changed encoding to use hard-coded ground-truth encoding from circle.
                 context = self._sample_context(self._task_idx)
-                # context = np.array(self._task_idx)
-                # context = np.repeat(context, self._embedding_batch_size, axis=0)
-                # context = context[:, np.newaxis]
-                # context = np_to_torch(context)
-                # flattened_input = context.view(-1)
-                # mapped_values = torch.stack([self._envidx_to_embeddings[int(key.item())] for key in flattened_input])
-                # context = mapped_values.view(1, 1, self._embedding_batch_size, 2)
+                context = np.array(self._task_idx)
+                context = np.repeat(context, self._embedding_batch_size, axis=0)
+                context = context[:, np.newaxis]
+                context = np_to_torch(context)
+                flattened_input = context.view(-1)
+                mapped_values = torch.stack([self._envidx_to_embeddings[int(key.item())] for key in flattened_input])
+                context = mapped_values.view(1, 1, self._embedding_batch_size, 2)
+                context = F.normalize(context, p=2, dim=-1)
                 self._policy.infer_posterior(context)
 
     def _sample_data(self, indices):
@@ -809,12 +827,15 @@ class GEOMeta(MetaRLAlgorithm):
                 exploration_episodes.
 
         """
-        total_steps = sum(exploration_episodes.lengths)
-        o = exploration_episodes.observations
-        a = exploration_episodes.actions
-        r = exploration_episodes.rewards.reshape(total_steps, 1)
-        ctxt = np.hstack((o, a, r)).reshape(1, total_steps, -1)
-        context = np_to_torch(ctxt)
+        if hasattr(exploration_episodes, "lengths"):
+            total_steps = sum(exploration_episodes.lengths)
+            o = exploration_episodes.observations
+            a = exploration_episodes.actions
+            r = exploration_episodes.rewards.reshape(total_steps, 1)
+            ctxt = np.hstack((o, a, r)).reshape(1, total_steps, -1)
+            context = np_to_torch(ctxt)
+        else:
+            context = exploration_episodes
         self._policy.infer_posterior(context)
 
         return self._policy

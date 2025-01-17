@@ -7,6 +7,7 @@ import numpy as np
 from PIL import Image
 from io import BytesIO
 import copy
+import torch.nn.functional as F
 
 from garage import EpisodeBatch, log_multitask_performance
 from garage.experiment.deterministic import get_seed
@@ -123,8 +124,7 @@ class MetaEvaluator:
             if self._hard_coded_embeddings is None:
                 adapted_policy = algo.adapt_policy(policy, eps)
             else:
-                adapted_policy = copy.deepcopy(policy)                
-                adapted_policy.z = self._hard_coded_embeddings[idx_env_up]
+                adapted_policy = algo.adapt_policy(policy, F.normalize(self._hard_coded_embeddings[idx_env_up], p=2))          
             task_embedding = adapted_policy.z.detach().cpu().numpy()
             task_embeddings.append(task_embedding)
             adapted_eps = self._test_sampler.obtain_samples(

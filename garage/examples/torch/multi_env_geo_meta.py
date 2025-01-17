@@ -66,7 +66,7 @@ default_config={
 
 custom_config={
     "num_train_tasks": 1,
-}
+    }
 
 config = {**default_config, **custom_config}
 
@@ -134,9 +134,9 @@ def CL_point_env(ctxt=None,
 
     """
     set_seed(seed)
-    encoder_hidden_sizes = (encoder_hidden_size, encoder_hidden_size,
-                            encoder_hidden_size)
-    # encoder_hidden_sizes = ()
+    # encoder_hidden_sizes = (encoder_hidden_size, encoder_hidden_size,
+                            # encoder_hidden_size)
+    encoder_hidden_sizes = ()
 
     env_sampler = SetTaskSampler(
         PointEnv,

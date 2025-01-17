@@ -91,7 +91,9 @@ class CLContextConditionedPolicy(nn.Module):
         else:
             # self.z = self.z_means 
             self.z = F.normalize(self.z_means, p=2, dim=1)
-            #TODO, how about we dont sample from a normal distributution here but rather a point on the unit circle? Then we could show that uncertainty increases the further we stray away from 
+        # self.z = torch.ones_like(self.z) #TODO, hard-coded z
+        if not np.isclose(self.z.detach().cpu().numpy(), np.array([-0.8671, 0.4981]), atol=1e-3).all() and not np.isclose(self.z.detach().cpu().numpy(), np.array([0, 0]), atol=1e-3).all():
+            print("Different embedding!! self.z: {}".format(self.z.detach().cpu().numpy()))
 
     def update_context(self, timestep):
         """Append single transition to the current context.
@@ -146,6 +148,7 @@ class CLContextConditionedPolicy(nn.Module):
             self.z_vars = torch.stack([p[1] for p in z_params])
         else:
             self.z_means = torch.mean(params, dim=1)
+        # self.z_means = torch.ones_like(self.z_means) #TODO, hard-coded task identity
         self.sample_from_belief()
 
     # pylint: disable=arguments-differ
@@ -177,6 +180,7 @@ class CLContextConditionedPolicy(nn.Module):
         self.infer_posterior(context)
         self.sample_from_belief()
         task_z = self.z
+        # assert np.isclose(self.z.detach().cpu().numpy(), np.array([-0.8671, 0.4981]), atol=1e-3).all() or np.isclose(self.z.detach().cpu().numpy(), np.array([0, 0]), atol=1e-3).all(), "self.z: {}".format(self.z.detach().cpu().numpy())
 
         # task, batch
         t, b, _ = obs.size()
@@ -212,6 +216,7 @@ class CLContextConditionedPolicy(nn.Module):
 
         """
         z = self.z
+        # assert np.isclose(self.z.detach().cpu().numpy(), np.array([-0.8671, 0.4981]), atol=1e-3).all() or np.isclose(self.z.detach().cpu().numpy(), np.array([0, 0]), atol=1e-3).all(), "self.z: {}".format(self.z.detach().cpu().numpy())
         obs = torch.as_tensor(obs[None], device=global_device()).float()
         obs_in = torch.cat([obs, z], dim=1)
         action, info = self._policy.get_action(obs_in)
