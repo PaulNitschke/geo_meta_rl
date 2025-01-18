@@ -106,7 +106,7 @@ class GeoMeta(MetaRLAlgorithm):
             num_train_tasks,
             num_test_tasks=None,
             encoder_hidden_sizes,
-            test_env_sampler,
+            test_envs,
             n_negative_samples,
             weight_embedding_loss_continuity = None,
             policy_class=CLContextConditionedPolicy,
@@ -144,6 +144,7 @@ class GeoMeta(MetaRLAlgorithm):
         self._vf = vf
         self._num_train_tasks = num_train_tasks
         self._latent_dim = latent_dim
+        self._test_envs = test_envs
 
         self._policy_mean_reg_coeff = policy_mean_reg_coeff
         self._policy_std_reg_coeff = policy_std_reg_coeff
@@ -180,17 +181,16 @@ class GeoMeta(MetaRLAlgorithm):
             self._envidx_to_embeddings[idx_env] = self._map_task_index_to_embedding(self._env, idx_env)
 
         # Tasks for which we do the parallel transport.
-        self._test_env = test_env_sampler.sample(num_test_tasks)
         self._testenvidx_to_embeddings = {}
-        for idx_env, _ in enumerate(self._test_env):
-            self._testenvidx_to_embeddings[idx_env] = self._map_task_index_to_embedding(self._test_env, idx_env)
+        for idx_env, _ in enumerate(self._test_envs):
+            self._testenvidx_to_embeddings[idx_env] = self._map_task_index_to_embedding(self._test_envs, idx_env)
         
         self._sampler = sampler
 
         self._is_resuming = False
 
         if num_test_tasks is None:
-            num_test_tasks = test_env_sampler.n_tasks
+            num_test_tasks = len(self._test_envs)
         if num_test_tasks is None:
             raise ValueError('num_test_tasks must be provided if '
                              'test_env_sampler.n_tasks is None')
@@ -207,7 +207,7 @@ class GeoMeta(MetaRLAlgorithm):
                                               )
         
         hard_coded_test_embeddings=[emb.unsqueeze(0) for emb in list(self._testenvidx_to_embeddings.values())]
-        self._test_evaluator = MetaEvaluator(test_tasks=self._test_env,
+        self._test_evaluator = MetaEvaluator(test_tasks=self._test_envs,
                                         worker_class=PEARLWorker,
                                         worker_args=worker_args,
                                         n_test_tasks=num_test_tasks,

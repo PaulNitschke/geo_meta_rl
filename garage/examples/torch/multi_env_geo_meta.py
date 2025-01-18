@@ -4,6 +4,7 @@ import click
 import sys
 import os
 import wandb
+import cloudpickle
 
 sys.path.append(os.path.abspath(os.getcwd()))
 
@@ -148,6 +149,7 @@ def CL_point_env(ctxt=None,
         PointEnv,
         wrapper=lambda env, _: normalize(
             env))
+    test_envs = test_env_sampler.sample(num_test_tasks)
 
     trainer = Trainer(ctxt)
 
@@ -185,7 +187,7 @@ def CL_point_env(ctxt=None,
         n_negative_samples=n_negative_samples,
         weight_embedding_loss_continuity=weight_embedding_loss_continuity,
         encoder_hidden_sizes=encoder_hidden_sizes,
-        test_env_sampler=test_env_sampler,
+        test_envs=test_envs,
         meta_batch_size=meta_batch_size,
         num_steps_per_epoch=num_steps_per_epoch,
         num_initial_steps=num_initial_steps,
@@ -197,6 +199,13 @@ def CL_point_env(ctxt=None,
         embedding_mini_batch_size=embedding_mini_batch_size,
         reward_scale=reward_scale,
     )
+
+    #Save training and test environments
+    log_dir = trainer._snapshotter.snapshot_dir
+    with open(os.path.join(log_dir, "train_envs.pkl"), "wb") as f:
+        cloudpickle.dump(env, f)
+    with open(os.path.join(log_dir, "test_envs.pkl"), "wb") as f:
+        cloudpickle.dump(test_envs, f)
 
     set_gpu_mode(use_gpu, gpu_id=0)
     if use_gpu:
