@@ -125,7 +125,7 @@ class PointEnv(Environment):
             print(self.render('ascii'))
 
         dist = np.linalg.norm(self._point - self._goal)
-        succ = dist < np.linalg.norm(self.action_space.low)
+        succ = dist < 2*np.linalg.norm(self.action_space.low)
 
         # dense reward
         reward = -dist
