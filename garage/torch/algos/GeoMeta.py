@@ -181,9 +181,11 @@ class GeoMeta(MetaRLAlgorithm):
             self._envidx_to_embeddings[idx_env] = self._map_task_index_to_embedding(self._env, idx_env)
 
         # Tasks for which we do the parallel transport.
-        self._testenvidx_to_embeddings = {}
-        for idx_env, _ in enumerate(self._test_envs):
-            self._testenvidx_to_embeddings[idx_env] = self._map_task_index_to_embedding(self._test_envs, idx_env)
+        self._do_parallel_transport = True if len(self._test_envs) > 0 else False
+        if self._do_parallel_transport:
+            self._testenvidx_to_embeddings = {}
+            for idx_env, _ in enumerate(self._test_envs):
+                self._testenvidx_to_embeddings[idx_env] = self._map_task_index_to_embedding(self._test_envs, idx_env)
         
         self._sampler = sampler
 
@@ -205,15 +207,15 @@ class GeoMeta(MetaRLAlgorithm):
                                               prefix="EvaluationTrain",
                                               hard_coded_embeddings=hard_coded_embeddings
                                               )
-        
-        hard_coded_test_embeddings=[emb.unsqueeze(0) for emb in list(self._testenvidx_to_embeddings.values())]
-        self._test_evaluator = MetaEvaluator(test_tasks=self._test_envs,
-                                        worker_class=PEARLWorker,
-                                        worker_args=worker_args,
-                                        n_test_tasks=num_test_tasks,
-                                        prefix="EvaluationTest",
-                                        hard_coded_embeddings=hard_coded_test_embeddings
-                                        )
+        if self._do_parallel_transport:
+            hard_coded_test_embeddings=[emb.unsqueeze(0) for emb in list(self._testenvidx_to_embeddings.values())]
+            self._transport_evaluator = MetaEvaluator(test_tasks=self._test_envs,
+                                            worker_class=PEARLWorker,
+                                            worker_args=worker_args,
+                                            n_test_tasks=num_test_tasks,
+                                            prefix="EvaluationTest",
+                                            hard_coded_embeddings=hard_coded_test_embeddings
+                                            )
 
         encoder_spec = self.get_env_spec(self._single_env, latent_dim,
                                          'encoder')
@@ -378,7 +380,8 @@ class GeoMeta(MetaRLAlgorithm):
             logger.log('Evaluating...')
             self._policy.reset_belief()
             self._train_evaluator.evaluate(self)
-            self._test_evaluator.evaluate(self)
+            if self._do_parallel_transport:
+                self._transport_evaluator.evaluate(self)
 
     def _train_once(self):
         """Perform one iteration of training."""
@@ -550,17 +553,18 @@ class GeoMeta(MetaRLAlgorithm):
             new_actions, policy_mean, policy_log_std, log_pi = policy_outputs[:4]
             
         #Parallel transport sampled trajectories to test tasks
-        t, b, _ = obs.size()
-        transported_obs = obs.clone().detach()
-        transported_actions = actions.clone().detach()
-        transported_next_obs = next_obs.clone().detach()
-        transported_task_z = self._testenvidx_to_embeddings[0].unsqueeze(0).unsqueeze(0).repeat(t, b, 1)
-        transported_rewards = self.transport_reward_batch(transported_obs.view(t * b, -1),
-                                                            transported_actions.view(t * b, -1),
-                                                            target_task_idx=0
-                                                        ).unsqueeze(1)
-        transported_next_obs = next_obs.clone().detach()
-        transported_terms = terms #TODO, this we can't really know, no?
+        if self._do_parallel_transport:
+            t, b, _ = obs.size()
+            transported_obs = obs.clone().detach()
+            transported_actions = actions.clone().detach()
+            transported_next_obs = next_obs.clone().detach()
+            transported_task_z = self._testenvidx_to_embeddings[0].unsqueeze(0).unsqueeze(0).repeat(t, b, 1)
+            transported_rewards = self.transport_reward_batch(transported_obs.view(t * b, -1),
+                                                                transported_actions.view(t * b, -1),
+                                                                target_task_idx=0
+                                                            ).unsqueeze(1)
+            transported_next_obs = next_obs.clone().detach()
+            transported_terms = terms #TODO, this we can't really know, no?
 
 
         # flatten out the task dimension
@@ -572,22 +576,23 @@ class GeoMeta(MetaRLAlgorithm):
         rewards_flat = rewards_flat * self._reward_scale
         terms_flat = terms.view(self._batch_size * num_tasks, -1)
 
-        transported_obs_flat = transported_obs.view(t * b, -1)
-        transported_actions_flat = transported_actions.view(t * b, -1)
-        transported_task_z_flat = transported_task_z.view(t * b, -1)
-        transported_next_obs_flat = transported_next_obs.view(t * b, -1)
-        transported_rewards_flat = transported_rewards.view(t * b, -1)
-        transported_rewards_flat = transported_rewards_flat * self._reward_scale
-        transported_terms_flat = transported_terms.view(t * b, -1)
+        if self._do_parallel_transport:
+            transported_obs_flat = transported_obs.view(t * b, -1)
+            transported_actions_flat = transported_actions.view(t * b, -1)
+            transported_task_z_flat = transported_task_z.view(t * b, -1)
+            transported_next_obs_flat = transported_next_obs.view(t * b, -1)
+            transported_rewards_flat = transported_rewards.view(t * b, -1)
+            transported_rewards_flat = transported_rewards_flat * self._reward_scale
+            transported_terms_flat = transported_terms.view(t * b, -1)
 
 
-        # append transported trajectories to the original trajectories
-        obs_flat = torch.cat([obs_flat, transported_obs_flat], dim=0)
-        actions_flat = torch.cat([actions_flat, transported_actions_flat], dim=0)
-        task_z = torch.cat([task_z, transported_task_z_flat], dim=0)
-        next_obs_flat = torch.cat([next_obs_flat, transported_next_obs_flat], dim=0)
-        rewards_flat = torch.cat([rewards_flat, transported_rewards_flat], dim=0)
-        terms_flat = torch.cat([terms_flat, transported_terms_flat], dim=0)
+            # append transported trajectories to the original trajectories
+            obs_flat = torch.cat([obs_flat, transported_obs_flat], dim=0)
+            actions_flat = torch.cat([actions_flat, transported_actions_flat], dim=0)
+            task_z = torch.cat([task_z, transported_task_z_flat], dim=0)
+            next_obs_flat = torch.cat([next_obs_flat, transported_next_obs_flat], dim=0)
+            rewards_flat = torch.cat([rewards_flat, transported_rewards_flat], dim=0)
+            terms_flat = torch.cat([terms_flat, transported_terms_flat], dim=0)
 
 
         # optimize qf and encoder networks
@@ -616,17 +621,19 @@ class GeoMeta(MetaRLAlgorithm):
         # Policy Optimization
         policy_outputs, task_z = self._policy(obs, context)
         new_actions, policy_mean, policy_log_std, log_pi = policy_outputs[:4]
-        transported_policy_outputs, transported_task_z = self._policy(transported_obs, transported_task_z)
-        transported_new_actions, transported_policy_mean, transported_policy_log_std, transported_log_pi = transported_policy_outputs[:4]
-        new_actions_flat = new_actions.view(t * b, -1)
-        transported_new_actions_flat = transported_new_actions.view(t * b, -1)
         task_z_flat = task_z.view(t * b, -1)
+        new_actions_flat = new_actions.view(t * b, -1)
 
-        policy_mean = np.vstack([policy_mean, transported_policy_mean])
-        policy_log_std = np.vstack([policy_log_std, transported_policy_log_std])
-        log_pi = torch.cat([log_pi, transported_log_pi], dim=0)
-        new_actions_flat = torch.cat([new_actions_flat, transported_new_actions_flat], dim=0)
-        task_z_flat = torch.cat([task_z_flat, transported_task_z_flat], dim=0)
+        if self._do_parallel_transport:
+            transported_policy_outputs, transported_task_z = self._policy(transported_obs, transported_task_z)
+            transported_new_actions, transported_policy_mean, transported_policy_log_std, transported_log_pi = transported_policy_outputs[:4]
+            transported_new_actions_flat = transported_new_actions.view(t * b, -1)
+
+            policy_mean = np.vstack([policy_mean, transported_policy_mean])
+            policy_log_std = np.vstack([policy_log_std, transported_policy_log_std])
+            log_pi = torch.cat([log_pi, transported_log_pi], dim=0)
+            new_actions_flat = torch.cat([new_actions_flat, transported_new_actions_flat], dim=0)
+            task_z_flat = torch.cat([task_z_flat, transported_task_z_flat], dim=0)
 
         # compute min Q on the new actions
         q1 = self._qf1(torch.cat([obs_flat, new_actions_flat], dim=1), task_z_flat.detach())

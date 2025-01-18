@@ -67,7 +67,7 @@ default_config={
 
 custom_config={
     "num_train_tasks": 5,
-    "num_test_tasks": 5,
+    "num_test_tasks": 0,
     }
 
 config = {**default_config, **custom_config}
