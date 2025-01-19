@@ -107,6 +107,7 @@ class GeoMeta(MetaRLAlgorithm):
             num_test_tasks=None,
             encoder_hidden_sizes,
             test_envs,
+            transport_envs,
             n_negative_samples,
             weight_embedding_loss_continuity = None,
             policy_class=CLContextConditionedPolicy,
@@ -145,6 +146,7 @@ class GeoMeta(MetaRLAlgorithm):
         self._num_train_tasks = num_train_tasks
         self._latent_dim = latent_dim
         self._test_envs = test_envs
+        self._transport_envs = transport_envs
 
         self._policy_mean_reg_coeff = policy_mean_reg_coeff
         self._policy_std_reg_coeff = policy_std_reg_coeff
@@ -174,18 +176,23 @@ class GeoMeta(MetaRLAlgorithm):
         self._single_env = env[0]()
         self.max_episode_length = self._single_env.spec.max_episode_length
 
-        # Hard-code tasks to their ground-truth embedding. Only valid for point environment.
+        # Hard-code tasks to their ground-truth embedding. Only valid for point environment. Train tasks.
         self._env_copy = copy.deepcopy(self._env)
         self._envidx_to_embeddings = {}
         for idx_env, _ in enumerate(self._env):
             self._envidx_to_embeddings[idx_env] = self._map_task_index_to_embedding(self._env, idx_env)
 
+        # Hard-code tasks to their ground-truth embedding. Only valid for point environment. Test tasks.
+        self._test_envidx_to_embeddings = {}
+        for idx_env, _ in enumerate(self._test_envs):
+            self._test_envidx_to_embeddings[idx_env] = self._map_task_index_to_embedding(self._test_envs, idx_env)
+
         # Tasks for which we do the parallel transport.
-        self._do_parallel_transport = True if len(self._test_envs) > 0 else False
+        self._do_parallel_transport = True if len(self._transport_envs) > 0 else False
         if self._do_parallel_transport:
-            self._testenvidx_to_embeddings = {}
-            for idx_env, _ in enumerate(self._test_envs):
-                self._testenvidx_to_embeddings[idx_env] = self._map_task_index_to_embedding(self._test_envs, idx_env)
+            self._transport_envidx_to_embeddings = {}
+            for idx_env, _ in enumerate(self._transport_envs):
+                self._transport_envidx_to_embeddings[idx_env] = self._map_task_index_to_embedding(self._transport_envs, idx_env)
         
         self._sampler = sampler
 
@@ -197,8 +204,8 @@ class GeoMeta(MetaRLAlgorithm):
             raise ValueError('num_test_tasks must be provided if '
                              'test_env_sampler.n_tasks is None')
 
+        # Evaluation workers
         worker_args = dict(deterministic=True, accum_context=True)
-
         hard_coded_embeddings=[emb.unsqueeze(0) for emb in list(self._envidx_to_embeddings.values())]
         self._train_evaluator = MetaEvaluator(test_tasks=env, 
                                               worker_class=PEARLWorker, 
@@ -207,14 +214,24 @@ class GeoMeta(MetaRLAlgorithm):
                                               prefix="EvaluationTrain",
                                               hard_coded_embeddings=hard_coded_embeddings
                                               )
+        
+        hard_coded_test_embeddings=[emb.unsqueeze(0) for emb in list(self._test_envidx_to_embeddings.values())]
+        self._test_evaluator = MetaEvaluator(test_tasks=self._test_envs, 
+                                              worker_class=PEARLWorker, 
+                                              worker_args=worker_args, 
+                                              n_test_tasks=num_test_tasks,
+                                              prefix="EvaluationTest",
+                                              hard_coded_embeddings=hard_coded_test_embeddings
+                                              )
+        
         if self._do_parallel_transport:
-            hard_coded_test_embeddings=[emb.unsqueeze(0) for emb in list(self._testenvidx_to_embeddings.values())]
-            self._transport_evaluator = MetaEvaluator(test_tasks=self._test_envs,
+            hard_coded_train_embeddings=[emb.unsqueeze(0) for emb in list(self._transport_envidx_to_embeddings.values())]
+            self._transport_evaluator = MetaEvaluator(test_tasks=self._transport_envs,
                                             worker_class=PEARLWorker,
                                             worker_args=worker_args,
                                             n_test_tasks=num_test_tasks,
-                                            prefix="EvaluationTest",
-                                            hard_coded_embeddings=hard_coded_test_embeddings
+                                            prefix="EvaluationTransport",
+                                            hard_coded_embeddings=hard_coded_train_embeddings
                                             )
 
         encoder_spec = self.get_env_spec(self._single_env, latent_dim,
@@ -380,7 +397,10 @@ class GeoMeta(MetaRLAlgorithm):
             logger.log('Evaluating...')
             self._policy.reset_belief()
             self._train_evaluator.evaluate(self)
+            self._policy.reset_belief()
+            self._test_evaluator.evaluate(self)
             if self._do_parallel_transport:
+                self._policy.reset_belief()
                 self._transport_evaluator.evaluate(self)
 
     def _train_once(self):
@@ -517,7 +537,7 @@ class GeoMeta(MetaRLAlgorithm):
     def transport_reward_batch(self, states, actions, target_task_idx):
         a = torch.clamp(actions, -0.1, 0.1)
         next_states = torch.clamp(states[:, :2] + a, -5, 5)
-        target_embeddings = self._testenvidx_to_embeddings[target_task_idx].unsqueeze(0)
+        target_embeddings = self._transport_envidx_to_embeddings[target_task_idx].unsqueeze(0)
         dist = torch.norm(next_states - target_embeddings, dim=1)
         return -dist
 
@@ -558,10 +578,10 @@ class GeoMeta(MetaRLAlgorithm):
             transported_obs = obs.clone().detach()
             transported_actions = actions.clone().detach()
             transported_next_obs = next_obs.clone().detach()
-            transported_task_z = self._testenvidx_to_embeddings[0].unsqueeze(0).unsqueeze(0).repeat(t, b, 1)
+            transported_task_z = self._transport_envidx_to_embeddings[0].unsqueeze(0).unsqueeze(0).repeat(t, b, 1)
             transported_rewards = self.transport_reward_batch(transported_obs.view(t * b, -1),
                                                                 transported_actions.view(t * b, -1),
-                                                                target_task_idx=0
+                                                                target_task_idx=0 #TODO, this should not be 0?
                                                             ).unsqueeze(1)
             transported_next_obs = next_obs.clone().detach()
             transported_terms = terms #TODO, this we can't really know, no?

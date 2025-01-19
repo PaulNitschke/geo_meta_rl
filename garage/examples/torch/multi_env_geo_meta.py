@@ -43,9 +43,10 @@ from garage.envs import normalize, PointEnv
 
 default_config={
     "seed": 1,
-    "num_epochs": 8,
+    "num_epochs": 3,
     "num_train_tasks": 2,
-    "num_test_tasks": 5,
+    "num_transport_tasks": 5,
+    "num_test_tasks": 50,
     "latent_size": 2,
     "encoder_hidden_size": 256,
     "net_size": 256,
@@ -66,8 +67,8 @@ default_config={
 }
 
 custom_config={
-    "num_train_tasks": 5,
-    "num_test_tasks": 0,
+    "num_train_tasks": 2,
+    "num_transport_tasks": 0,
     }
 
 config = {**default_config, **custom_config}
@@ -83,6 +84,7 @@ def CL_point_env(ctxt=None,
                              seed=config["seed"],
                              num_epochs=config["num_epochs"],
                              num_train_tasks=config["num_train_tasks"],
+                             num_transport_tasks=config["num_transport_tasks"],
                              num_test_tasks=config["num_test_tasks"],
                              latent_size=config["latent_size"],
                              encoder_hidden_size=config["encoder_hidden_size"],
@@ -145,11 +147,17 @@ def CL_point_env(ctxt=None,
         wrapper=lambda env, _: normalize(
             env))
     env = env_sampler.sample(num_train_tasks)
+    transport_env_sampler = SetTaskSampler(
+        PointEnv,
+        wrapper=lambda env, _: normalize(
+            env))
+    transport_envs = transport_env_sampler.sample(num_transport_tasks)
     test_env_sampler = SetTaskSampler(
         PointEnv,
         wrapper=lambda env, _: normalize(
             env))
     test_envs = test_env_sampler.sample(num_test_tasks)
+    del env_sampler, transport_env_sampler, test_env_sampler
 
     trainer = Trainer(ctxt)
 
@@ -188,6 +196,7 @@ def CL_point_env(ctxt=None,
         weight_embedding_loss_continuity=weight_embedding_loss_continuity,
         encoder_hidden_sizes=encoder_hidden_sizes,
         test_envs=test_envs,
+        transport_envs=transport_envs,
         meta_batch_size=meta_batch_size,
         num_steps_per_epoch=num_steps_per_epoch,
         num_initial_steps=num_initial_steps,
@@ -204,6 +213,8 @@ def CL_point_env(ctxt=None,
     log_dir = trainer._snapshotter.snapshot_dir
     with open(os.path.join(log_dir, "train_envs.pkl"), "wb") as f:
         cloudpickle.dump(env, f)
+    with open(os.path.join(log_dir, "transport_envs.pkl"), "wb") as f:
+        cloudpickle.dump(transport_envs, f)
     with open(os.path.join(log_dir, "test_envs.pkl"), "wb") as f:
         cloudpickle.dump(test_envs, f)
 
