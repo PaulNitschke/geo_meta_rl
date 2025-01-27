@@ -207,7 +207,7 @@ class MetaEvaluator:
     def rollout_plotter(self,
                              trajs, 
                              title,
-                            add_legend: bool = True):
+                            add_legend: bool = False):
         # Create a colormap and normalizer
         cmap = plt.cm.hsv  # Use the hsv colormap
         norm = Normalize(vmin=0, vmax=2 * np.pi)
@@ -265,17 +265,14 @@ class MetaEvaluator:
         if add_legend:
             ax.scatter([], [], color='black', marker='x', label='Task Goal')
             ax.plot([], [], color='black', label='Task Trajectory')
-
+            ax.legend(ncol=2, loc='lower center', bbox_to_anchor=(0.48, -0.05), frameon=False, fontsize=25)
+            plt.title(title, fontsize=35, pad=20)
         # Turn off the axis
         ax.axis('off')
 
-        # Add title
-        plt.title(title, fontsize=35, pad=20)
-        ax.legend(ncol=2, loc='lower center', bbox_to_anchor=(0.48, -0.05), frameon=False, fontsize=25)
-
         # Save plot to a BytesIO buffer
         buf = BytesIO()
-        plt.savefig(buf, format='png')
+        plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
         plt.close(fig)
         buf.seek(0)
         image = Image.open(buf)
