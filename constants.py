@@ -7,4 +7,4 @@ FIG_HEIGHT = 10
 DPI = 300
 
 # PyTorch
-DTYPE = DTYPE = torch.float32
+DTYPE = torch.float32
