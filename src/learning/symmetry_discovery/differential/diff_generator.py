@@ -73,7 +73,6 @@ class DiffGenerator():
         #TODO, fix this, kernel bases should have correct shape from the beginning.
         kernel_bases = kernel_bases.transpose(1,2) #(b,d,n)
 
-
         def project_onto_subspace(vecs, basis):
             """Projects a set of vectors into a vector space spanned by basis.
             vecs: tensor of shape (b,d,n)
@@ -98,8 +97,10 @@ class DiffGenerator():
         del infinitesimal_generator_batched_, infinitesimal_generator
 
         # Step 1: Use infinitesimal generator to compute differential generator bases at points p according to infinitesimal generator.
-        gen_bases = torch.einsum('bdnm,bm->bdn', infinitesimal_generator_batched, ps)
-
+        try:
+            gen_bases = torch.einsum('bdnm,bm->bdn', infinitesimal_generator_batched, ps)
+        except:
+            breakpoint = True
         # Step 2a: Symmetry: Check whether each basis vector in kernel_bases_diff_gen is in the span of kernel_bases.
         # To this end, compute orthogonal complement:
         proj_gen_on_kernel = project_onto_subspace(gen_bases, kernel_bases)
@@ -119,7 +120,7 @@ class DiffGenerator():
                       p_batch,
                       bases_batch):
         
-        loss = self._compute_loss(generator, p_batch, bases_batch, track_losses=True)
+        loss = self._compute_loss_diff(generator, p_batch, bases_batch, track_losses=True)
 
         # Update generator
         self.optimizer_diff.zero_grad()
@@ -127,7 +128,7 @@ class DiffGenerator():
         self.optimizer_diff.step()
 
     
-    def _compute_loss(self, generator, p_batch, bases_batch, track_losses: bool=False):
+    def _compute_loss_diff(self, generator, p_batch, bases_batch, track_losses: bool=False):
         """Computes Main loss: projects generator into kernel and kernel into generator."""
         # Normalize infinitesimal generator to have unit Frobenius norm in each Lie group dimension.
         # self.g_norm = self._normalize_tensor(tensor=generator, dim=(1,2))
@@ -136,6 +137,7 @@ class DiffGenerator():
         orth_gen_on_kernel, orth_kernel_on_gen = self.orthogonal_projec(infinitesimal_generator=self.g_norm,
                                                                         ps = p_batch,
                                                                         kernel_bases = bases_batch)
+
         
         # Minimize orthogonal complements. Here, orth_gen_on_kernel and orth_kernel_on_gen are of shape (b,d,n) and we compute the norm along d and n
         # which is zero if each basis vector is contained in the span of the respective other vectors.
@@ -158,7 +160,7 @@ class DiffGenerator():
         """
 
         generator_hessian = generator.detach().clone().requires_grad_(True)
-        loss_fn = lambda gen: self._compute_loss(gen, p_batch, bases_batch)
+        loss_fn = lambda gen: self._compute_loss_diff(gen, p_batch, bases_batch)
         H = torch.autograd.functional.hessian(loss_fn, generator_hessian)
         return H.reshape(generator.numel(), generator.numel())
 
@@ -169,7 +171,7 @@ class DiffGenerator():
         return tensor/_norm_tensor
     
 
-    def _sample_data(self, n_samples: int):
+    def _sample_data_diff(self, n_samples: int):
         """Uniformly samples n_samples points and their corresponding kernel bases."""
         idxs = random.sample(self._bases_idxs, n_samples)
         p_batch = self.p[idxs]
@@ -186,7 +188,7 @@ class DiffGenerator():
         for _ in tqdm(range(self._n_steps)):
 
             #Sample data
-            p_batch, bases_batch = self._sample_data(n_samples=self._batch_size)
+            p_batch, bases_batch = self._sample_data_diff(n_samples=self._batch_size)
 
             # Track Hessian of loss function.
             if self._track_hessian:

@@ -56,7 +56,7 @@ class FuncGenerator():
                       take_gradient_step: bool = True
                       ):
         
-        loss=self._compute_loss(generator, p_batch, group_coeffs_batch)
+        loss=self._compute_loss_func(generator, p_batch, group_coeffs_batch)
 
         # Update generator, can be turned off to evaluate the current generator.
         if take_gradient_step:
@@ -69,7 +69,7 @@ class FuncGenerator():
         return loss
     
 
-    def _compute_loss(self, generator, p_batch, group_coeffs_batch) -> float:
+    def _compute_loss_func(self, generator, p_batch, group_coeffs_batch) -> float:
         """Computes the loss of the current generator via functional symmetry."""
         # Normalize infinitesimal generator to have unit Frobenius norm in each Lie group dimension.
         # self.g_norm = self._normalize_tensor(tensor=generator, dim=(1,2))
@@ -98,7 +98,7 @@ class FuncGenerator():
         """
 
         generator_hessian = generator.detach().clone().requires_grad_(True)
-        loss_fn = lambda gen: self._compute_loss(gen, p_batch, group_coeffs_batch)
+        loss_fn = lambda gen: self._compute_loss_func(gen, p_batch, group_coeffs_batch)
         H = torch.autograd.functional.hessian(loss_fn, generator_hessian)
         return H.reshape(generator.numel(), generator.numel())
 
@@ -109,7 +109,7 @@ class FuncGenerator():
         return tensor/_norm_tensor
     
 
-    def _sample_data(self, n_samples):
+    def _sample_data_func(self, n_samples):
         """Uniformly samples n_samples points and group action coefficients."""
         idxs = random.sample(list(range(len(self.p))), n_samples, )
         p_batch = self.p[idxs]
@@ -126,7 +126,7 @@ class FuncGenerator():
         for _ in tqdm(range(self._n_steps)):
 
             #Sample data
-            p_batch, coeffs_group_batch = self._sample_data(n_samples=self._batch_size)
+            p_batch, coeffs_group_batch = self._sample_data_func(n_samples=self._batch_size)
 
             # Track Hessian of loss function.
             if self._track_hessian:
