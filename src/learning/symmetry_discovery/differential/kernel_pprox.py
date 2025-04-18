@@ -65,7 +65,7 @@ def _compute_kernel_samples(x_values, y_values, epsilon_ball, epsilon_level_set)
 
     # a) Approximate which samples are (i) close to a given sample and (ii) belong to the same level.
     local_level_set = {}
-    for idx, y in enumerate(y_values):
+    for idx, y in tqdm(enumerate(y_values), desc="Compute Kernel Samples..."):
 
         x_neighbors_idxs = np.array(neighbors[idx])
         x_neighbors_idxs = x_neighbors_idxs[x_neighbors_idxs != idx] #remove the point itself
@@ -101,7 +101,7 @@ def _compute_pointwise_basis(kernel_vectors: dict[int, torch.tensor],
     basis = {}
     count_no_tangents, count_one_tangent, count_multiple_tangents = 0,0,0
     n_samples = len(kernel_vectors.keys())
-    for idx_sample in tqdm(kernel_vectors.keys()):
+    for idx_sample in tqdm(kernel_vectors.keys(), desc="Compute Point-Wise Bases..."):
 
         kernel_vectors_point = kernel_vectors[idx_sample]
         if len(kernel_vectors_point) == 0:

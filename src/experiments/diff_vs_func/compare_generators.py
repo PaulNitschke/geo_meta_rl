@@ -1,6 +1,10 @@
 import random
-import torch
+import warnings
 
+import torch
+from tqdm import tqdm
+
+from constants import DTYPE
 from src.learning.symmetry_discovery.differential.diff_generator import DiffGenerator
 from src.learning.symmetry_discovery.functional.func_generator import FuncGenerator
 
@@ -24,6 +28,7 @@ class DiffFuncGenerator(DiffGenerator, FuncGenerator):
 
         DiffGenerator.__init__(self, self.g_0_diff, p, bases, batch_size, n_steps, optimizer=self.optimizer_diff)
         FuncGenerator.__init__(self, self.g_0_func, p, func, batch_size, n_steps=n_steps, optimizer=self.optimizer_func)
+        warnings.warn("Current evaluation only supports rotation symmetry.")
 
         self.p = p
         self.bases = bases
@@ -32,17 +37,9 @@ class DiffFuncGenerator(DiffGenerator, FuncGenerator):
         self.n_steps = n_steps
         self.g_oracle = g_oracle
 
-        self.func_losses = []
-        self.diff_losses = []
-        self.oracle_losses = []
-
-        self.func_losses_symmetry = []
-        self.diff_losses_symmetry = []
-        self.oracle_losses_symmetry = []
-
-        self.func_losses_maximal = []
-        self.diff_losses_maximal = []
-        self.oracle_losses_maximal = []
+        self.func_losses, self.diff_losses, self.oracle_losses = [], [], []
+        self.func_losses_symmetry, self.diff_losses_symmetry, self.oracle_losses_symmetry = [], [], []
+        self.func_losses_maximal, self.diff_losses_maximal, self.oracle_losses_maximal = [], [], []
 
 
     def take_one_gradient_step(self,
@@ -119,7 +116,8 @@ class DiffFuncGenerator(DiffGenerator, FuncGenerator):
 
     def optimize(self):
 
-        for _ in range(self.n_steps):
+        pbar = tqdm(range(self.n_steps), desc="Learning Differential and Functional Generator") 
+        for idx_step in pbar:
 
             #1. Sample data
             p_batch, bases_batch, group_coeffs_batch = self.sample_data()
@@ -152,3 +150,6 @@ class DiffFuncGenerator(DiffGenerator, FuncGenerator):
                 self.diff_losses_maximal.append(loss_diff_maximal.detach().numpy())
                 self.func_losses_maximal.append(loss_func_maximal.detach().numpy())
                 self.oracle_losses_maximal.append(loss_oracle_maximal.detach().numpy())
+            
+            if idx_step % 100 == 0:
+                pbar.set_postfix({'Diff. loss': f'{loss_diff:.2f}', 'Func. loss': f'{loss_func:.2f}'})

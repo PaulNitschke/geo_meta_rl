@@ -1,4 +1,5 @@
 import random
+import warnings
 
 from tqdm import tqdm
 import torch
@@ -12,7 +13,9 @@ class DiffGenerator():
                  bases,
                  batch_size: int,
                  n_steps: int,
-                 optimizer):
+                 optimizer,
+                 random_seed: int=None,
+                 track_hessian: bool=False):
         """
         Learns a maximal symmetry from point-wise bases.
 
@@ -22,9 +25,8 @@ class DiffGenerator():
         - bases: torch.tensor, point-wise bases
         - batch_size: int
         - n_steps: int, number of gradient steps
-        - learn_symmetry: bool, whether to compute orthogonal complement of infinitesimal generator w.r.t. bases (default should be true)
-        - learn_maximal: bool, whether to compute orthogonal complement of bases w.r.t. infinitesimal generator (default can be true or false, 
                          false may learn subsymmetry but more stable while true learns maximal symmetry but less stable)
+        - track_hessian: bool, whether to track the hessian of the loss function
         """
         
         self.g = g_0
@@ -34,11 +36,21 @@ class DiffGenerator():
 
         self._batch_size = batch_size
         self._n_steps = n_steps
+        self._track_hessian = track_hessian
 
         self._bases_idxs = list(self.bases.keys())
         self._losses = []
         self._losses_symmetry = []
         self._losses_maximal = []
+        if self._track_hessian:
+            self.gs = []
+            self.hessians = []
+
+        if random_seed is not None:
+            random.seed(random_seed)
+            torch.manual_seed(random_seed)
+
+        warnings.warn("Differential Generator is not Normalized During Training")
 
     def orthogonal_projec(self,
                           infinitesimal_generator, 
@@ -107,9 +119,19 @@ class DiffGenerator():
                       p_batch,
                       bases_batch):
         
+        loss = self._compute_loss(generator, p_batch, bases_batch, track_losses=True)
+
+        # Update generator
+        self.optimizer_diff.zero_grad()
+        loss.backward()
+        self.optimizer_diff.step()
+
+    
+    def _compute_loss(self, generator, p_batch, bases_batch, track_losses: bool=False):
+        """Computes Main loss: projects generator into kernel and kernel into generator."""
         # Normalize infinitesimal generator to have unit Frobenius norm in each Lie group dimension.
-        self.g_norm = self._normalize_tensor(tensor=generator, dim=(1,2))
-        
+        # self.g_norm = self._normalize_tensor(tensor=generator, dim=(1,2))
+        self.g_norm = generator
         # Compute orthogonal complement of differential generator with respect to kernel bases and orth.complement of kernel bases with respect to diff. generator.
         orth_gen_on_kernel, orth_kernel_on_gen = self.orthogonal_projec(infinitesimal_generator=self.g_norm,
                                                                         ps = p_batch,
@@ -119,37 +141,59 @@ class DiffGenerator():
         # which is zero if each basis vector is contained in the span of the respective other vectors.
         loss_symmetry = torch.sum(torch.norm(orth_gen_on_kernel, dim=(1,2)), dim=0)
         loss_maximal = torch.sum(torch.norm(orth_kernel_on_gen, dim=(1,2)), dim=0)
-
-        # Final loss
         loss = loss_symmetry + loss_maximal
 
-        # Update generator
-        self.optimizer_diff.zero_grad()
-        loss.backward()
-        self.optimizer_diff.step()
+        if track_losses:
+            self._losses_symmetry.append(loss_symmetry.detach().numpy())
+            self._losses_maximal.append(loss_maximal.detach().numpy())
+            self._losses.append(loss.detach().numpy())
 
-        self._losses_symmetry.append(loss_symmetry.detach().numpy())
-        self._losses_maximal.append(loss_maximal.detach().numpy())
-        self._losses.append(loss.detach().numpy())
+        return loss        
 
-    
+
+    def _compute_hessian(self, generator, p_batch, bases_batch) -> torch.tensor:
+        """Computes the Hessian of the loss function at a generator.
+        Returns:
+        - Hessian: tensor of shape (|M|^2, |M|^2)
+        """
+
+        generator_hessian = generator.detach().clone().requires_grad_(True)
+        loss_fn = lambda gen: self._compute_loss(gen, p_batch, bases_batch)
+        H = torch.autograd.functional.hessian(loss_fn, generator_hessian)
+        return H.reshape(generator.numel(), generator.numel())
+
+
     def _normalize_tensor(self, tensor, dim, norm='fro'):
         """Normalizes a tensor along given dimensions to have unit Frobenius norm."""
         _norm_tensor = tensor.norm(p=norm, dim=dim, keepdim=True) + 1e-8 #(d,d,n)
         return tensor/_norm_tensor
     
 
+    def _sample_data(self, n_samples: int):
+        """Uniformly samples n_samples points and their corresponding kernel bases."""
+        idxs = random.sample(self._bases_idxs, n_samples)
+        p_batch = self.p[idxs]
+        bases_batch = torch.vstack([self.bases[i] for i in idxs]).unsqueeze(-1) #(b, n, d)
+
+        # Normalize bases to have unit Frobenius norm
+        bases_batch = self._normalize_tensor(tensor=bases_batch, dim=(1,2))
+
+        return p_batch, bases_batch
+    
+
     def optimize(self):
         """Main Optimization Loop."""
         for _ in tqdm(range(self._n_steps)):
 
-            idxs = random.sample(self._bases_idxs, self._batch_size)
-            p_batch = self.p[idxs]
-            bases_batch = torch.vstack([self.bases[i] for i in idxs]).unsqueeze(-1) #(b, n, d)
+            #Sample data
+            p_batch, bases_batch = self._sample_data(n_samples=self._batch_size)
 
-            # Normalize bases to have unit Frobenius norm
-            bases_batch = self._normalize_tensor(tensor=bases_batch, dim=(1,2))
+            # Track Hessian of loss function.
+            if self._track_hessian:
+                self.hessians.append(self._compute_hessian(self.g, p_batch, bases_batch))
+                self.gs.append(self.g.detach().clone())
 
             self.take_one_gradient_step_diff(generator=self.g, p_batch=p_batch, bases_batch=bases_batch)
+
 
         return self.g_norm
