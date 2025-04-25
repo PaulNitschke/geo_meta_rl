@@ -21,14 +21,17 @@ class DiffFuncGenerator(DiffGenerator, FuncGenerator):
                  n_steps: int,
                  random_seed: int=None):
         
-        self.g_0_diff = torch.nn.Parameter(g_0.clone().detach().requires_grad_(True))
-        self.g_0_func = torch.nn.Parameter(g_0.clone().detach().requires_grad_(True))
+        if random_seed is None:
+            warnings.warn("No random seed set.")
+        
+        self.g_diff = torch.nn.Parameter(g_0.clone().detach().requires_grad_(True))
+        self.g_func = torch.nn.Parameter(g_0.clone().detach().requires_grad_(True))
 
-        self.optimizer_diff = torch.optim.Adam([self.g_0_diff], lr=0.00045)
-        self.optimizer_func = torch.optim.Adam([self.g_0_func], lr=0.00045)
+        self.optimizer_diff = torch.optim.Adam([self.g_diff], lr=0.00045)
+        self.optimizer_func = torch.optim.Adam([self.g_func], lr=0.00045)
 
-        DiffGenerator.__init__(self, self.g_0_diff, p, bases, batch_size, n_steps, optimizer=self.optimizer_diff, random_seed=random_seed)
-        FuncGenerator.__init__(self, self.g_0_func, p, func, batch_size, n_steps=n_steps, optimizer=self.optimizer_func, random_seed=random_seed)
+        DiffGenerator.__init__(self, self.g_diff, p, bases, batch_size, n_steps, optimizer=self.optimizer_diff, random_seed=random_seed)
+        FuncGenerator.__init__(self, self.g_func, p, func, batch_size, n_steps=n_steps, optimizer=self.optimizer_func, random_seed=random_seed)
         warnings.warn("Current evaluation only supports rotation symmetry.")
 
         self.p = p
@@ -51,8 +54,8 @@ class DiffFuncGenerator(DiffGenerator, FuncGenerator):
         """Takes a gradient step via both differental and functional symmetry discovery on the same data (but different generators)."""
 
         # Gradient Update.
-        self.take_one_gradient_step_diff(generator=self.g_0_diff, p_batch=p_batch_diff, bases_batch=bases_batch)
-        self.take_one_gradient_step_func(generator=self.g_0_func, p_batch=p_batch_func, group_coeffs_batch=group_coeffs_batch, take_gradient_step=True)
+        self.take_one_gradient_step_diff(generator=self.g_diff, p_batch=p_batch_diff, bases_batch=bases_batch)
+        self.take_one_gradient_step_func(generator=self.g_func, p_batch=p_batch_func, group_coeffs_batch=group_coeffs_batch, take_gradient_step=True)
 
     def evaluate_generator(self, p_batch, generator, oracle_generator):
         """Evaluates a learned generator against a ground truth generator by checking whether they span the same subspaces at different points."""
@@ -96,23 +99,6 @@ class DiffFuncGenerator(DiffGenerator, FuncGenerator):
         loss_maximal = torch.sum(torch.norm(orth_oracle_on_gen, dim=(1,2)), dim=0)
 
         return loss_symmetry, loss_maximal, loss_symmetry + loss_maximal
-
-
-    # def sample_data(self):
-    #     """"Samples batch size points from the manifold, kernel basis vector and coeffs for group actions."""
-    #     _bases_idxs = list(self.bases.keys()) #Only sample from those points where we estimated a basis.
-    #     idxs = random.sample(_bases_idxs, self._batch_size)
-    #     p_batch = self.p[idxs]
-
-    #     # Bases for differential discovery
-    #     bases_batch = torch.vstack([self.bases[i] for i in idxs]).unsqueeze(-1) #(b, n, d)
-    #     bases_batch = self._normalize_tensor(tensor=bases_batch, dim=(1,2))
-
-    #     # Group actions for functional discovery
-    #     # TODO, currently for symmetry group, change range from 2pi to arbitrary coefficients.
-    #     group_coeffs_batch = torch.rand((self._batch_size, self._group_dim))*2*torch.pi
-
-    #     return p_batch, bases_batch, group_coeffs_batch
             
 
     def optimize(self):
@@ -132,13 +118,11 @@ class DiffFuncGenerator(DiffGenerator, FuncGenerator):
             p_batch, _ = self._sample_data_diff(n_samples=self._batch_size)
             with torch.no_grad():
                 # Normalize as length of orthogonal component depends on length of basis.
-                self.g_0_diff_norm = self._normalize_tensor(self.g_0_diff, dim=(1,2))
-                self.g_0_func_norm = self._normalize_tensor(self.g_0_func, dim=(1,2))
-                loss_diff_symmetry, loss_diff_maximal, loss_diff = self.evaluate_generator(p_batch, self.g_0_diff_norm, self.g_oracle)
-                loss_func_symmetry, loss_func_maximal, loss_func = self.evaluate_generator(p_batch, self.g_0_func_norm, self.g_oracle)
-                # TODO: hard-coded oracle prime, change this to a rotation of self.g_oracle
-                g_oracle_prime = torch.tensor([[0, 1], [-1, 0]], dtype=DTYPE).unsqueeze(0)
-                loss_oracle_symmetry, loss_oracle_maximal, loss_oracle = self.evaluate_generator(p_batch, g_oracle_prime, self.g_oracle)
+                self.g_diff_norm = self._normalize_tensor(self.g_diff, dim=(1,2))
+                self.g_func_norm = self._normalize_tensor(self.g_func, dim=(1,2))
+                loss_diff_symmetry, loss_diff_maximal, loss_diff = self.evaluate_generator(p_batch, self.g_diff_norm, self.g_oracle)
+                loss_func_symmetry, loss_func_maximal, loss_func = self.evaluate_generator(p_batch, self.g_func_norm, self.g_oracle)
+                loss_oracle_symmetry, loss_oracle_maximal, loss_oracle = self.evaluate_generator(p_batch, self.g_oracle, self.g_oracle)
 
 
                 self.diff_losses.append(loss_diff.detach().numpy())
@@ -154,4 +138,4 @@ class DiffFuncGenerator(DiffGenerator, FuncGenerator):
                 self.oracle_losses_maximal.append(loss_oracle_maximal.detach().numpy())
             
             if idx_step % 100 == 0:
-                pbar.set_postfix({'Diff. loss': f'{loss_diff:.2f}', 'Func. loss': f'{loss_func:.2f}'})
+                pbar.set_postfix({'Generator Span Diff. Loss': f'{loss_diff:.2f}', 'Generator Span Func. Loss': f'{loss_func:.2f}'})
