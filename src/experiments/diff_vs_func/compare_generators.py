@@ -44,6 +44,7 @@ class DiffFuncGenerator(DiffGenerator, FuncGenerator):
         self.func_losses, self.diff_losses, self.oracle_losses = [], [], []
         self.func_losses_symmetry, self.diff_losses_symmetry, self.oracle_losses_symmetry = [], [], []
         self.func_losses_maximal, self.diff_losses_maximal, self.oracle_losses_maximal = [], [], []
+        self.func_losses_func_space, self.diff_losses_func_space, self.oracle_losses_func_space = [], [], []
 
 
     def take_one_gradient_step(self,
@@ -114,16 +115,23 @@ class DiffFuncGenerator(DiffGenerator, FuncGenerator):
             self.take_one_gradient_step(p_batch_diff=p_batch_diff, bases_batch=bases_batch, p_batch_func=p_batch_func, group_coeffs_batch=group_coeffs_batch)
             del p_batch_diff, bases_batch, p_batch_func, group_coeffs_batch
 
-            #3. Evaluate on fresh data
-            p_batch, _ = self._sample_data_diff(n_samples=self._batch_size)
             with torch.no_grad():
-                # Normalize as length of orthogonal component depends on length of basis.
+            #3. Evaluate on fresh data
+                p_batch, _ = self._sample_data_diff(n_samples=self._batch_size)
+                _, group_coeffs_batch = self._sample_data_func(n_samples=self._batch_size)
+
+                # Generator Span Evaluation
+                ## Normalize as length of orthogonal component depends on length of basis.
                 self.g_diff_norm = self._normalize_tensor(self.g_diff, dim=(1,2))
                 self.g_func_norm = self._normalize_tensor(self.g_func, dim=(1,2))
                 loss_diff_symmetry, loss_diff_maximal, loss_diff = self.evaluate_generator(p_batch, self.g_diff_norm, self.g_oracle)
                 loss_func_symmetry, loss_func_maximal, loss_func = self.evaluate_generator(p_batch, self.g_func_norm, self.g_oracle)
                 loss_oracle_symmetry, loss_oracle_maximal, loss_oracle = self.evaluate_generator(p_batch, self.g_oracle, self.g_oracle)
 
+                # Function Level Evaluation.
+                loss_func_func_space = self._compute_loss_func(self.g_func, p_batch=p_batch, group_coeffs_batch=group_coeffs_batch)
+                loss_diff_func_space = self._compute_loss_func(self.g_diff, p_batch=p_batch, group_coeffs_batch=group_coeffs_batch)
+                loss_oracle_func_space = self._compute_loss_func(self.g_oracle, p_batch=p_batch, group_coeffs_batch=group_coeffs_batch)
 
                 self.diff_losses.append(loss_diff.detach().numpy())
                 self.func_losses.append(loss_func.detach().numpy())
@@ -136,6 +144,10 @@ class DiffFuncGenerator(DiffGenerator, FuncGenerator):
                 self.diff_losses_maximal.append(loss_diff_maximal.detach().numpy())
                 self.func_losses_maximal.append(loss_func_maximal.detach().numpy())
                 self.oracle_losses_maximal.append(loss_oracle_maximal.detach().numpy())
+
+                self.func_losses_func_space.append(loss_func_func_space.detach().numpy())
+                self.diff_losses_func_space.append(loss_diff_func_space.detach().numpy())
+                self.oracle_losses_func_space.append(loss_oracle_func_space.detach().numpy())
             
             if idx_step % 100 == 0:
                 pbar.set_postfix({'Generator Span Diff. Loss': f'{loss_diff:.2f}', 'Generator Span Func. Loss': f'{loss_func:.2f}'})
