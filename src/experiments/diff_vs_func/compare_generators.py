@@ -84,15 +84,17 @@ class DiffFuncGenerator(DiffGenerator, FuncGenerator):
         oracle_generator_batched = oracle_generator.unsqueeze(0)
         oracle_generator_batched = oracle_generator_batched.repeat(self._batch_size, 1, 1, 1)
         
-        # Step 0: Evaluate the generators at different points:
+        # Step 1: Evaluate the generators at different points:
         generator_ps = torch.einsum('bdnm,bm->bdn', generator_batched, p_batch)
         oracle_generator_ps = torch.einsum('bdnm,bm->bdn', oracle_generator_batched, p_batch)
 
-        # Step 1: Check whether generator is a subspace of oracle generator at different points
+        # Step 2: Check whether generator is a subspace of oracle generator at different points. This is the symmetry part where
+        # the learned generator spans no more than the subspace of the oracle.
         proj_gen_on_oracle = project_onto_subspace(generator_ps, oracle_generator_ps)
         orth_gen_on_oracle = generator_ps - proj_gen_on_oracle
 
-        # Step 2: Check whether oracle generator is a subspace of generator
+        # Step 3: Check whether oracle generator is a subspace of generator. This is the maximal part where the learned generator
+        # spans at least the subspace of the oracle.
         proj_oracle_on_gen = project_onto_subspace(oracle_generator_ps, generator_ps)
         orth_oracle_on_gen = oracle_generator_ps - proj_oracle_on_gen
 
