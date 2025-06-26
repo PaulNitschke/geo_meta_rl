@@ -235,9 +235,8 @@ class MetaEvaluator:
 
         # Set fixed aspect ratio and limits
         ax.set_aspect('equal', adjustable='box')
-        circle_radius = 2
-        ax.set_xlim(-circle_radius * 1.2, circle_radius * 1.2)  # Add more padding around the circle
-        ax.set_ylim(-circle_radius * 1.2, circle_radius * 1.2)  # Add more padding around the circle
+        ax.set_xlim(1.2, 1.2)  # Add more padding around the circle
+        ax.set_ylim(1.2, 1.2)  # Add more padding around the circle
 
         # Add grid in the background
         ax.grid(True, linestyle='--', linewidth=0.5, alpha=0.7, color='gray')

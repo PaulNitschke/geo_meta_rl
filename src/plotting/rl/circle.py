@@ -13,7 +13,7 @@ def plot_rollouts_on_circle(train_trajectories: List[np.ndarray],
                              idx_label_test=3,
                              legend: bool=False,
                              savepath: str=None,
-                             radius: int=2) -> None:
+                             radius: int=1) -> None:
     """
     Plots trajectories from train and test tasks on the circle navigation task.
     Args:

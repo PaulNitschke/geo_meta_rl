@@ -44,7 +44,7 @@ class PointEnv(Environment):
         self._task = {'goal': self._goal}
         self._observation_space = akro.Box(low=-np.inf,
                                            high=np.inf,
-                                           shape=(3, ),
+                                           shape=(2, ),
                                            dtype=np.float32)
         self._action_space = akro.Box(low=-0.1,
                                       high=0.1,
@@ -126,7 +126,7 @@ class PointEnv(Environment):
             print(self.render('ascii'))
 
         dist = np.linalg.norm(self._point - self._goal)
-        succ = dist < 2*np.linalg.norm(self.action_space.low)
+        succ = dist < np.linalg.norm(self.action_space.low)
 
         # dense reward
         reward = -dist
@@ -185,8 +185,9 @@ class PointEnv(Environment):
         """Close the env."""
 
     # pylint: disable=no-self-use
-    def sample_tasks(self, num_tasks):
-        """Sample a list of `num_tasks` tasks. Tasks are uniformly distributed on circle with radius 2.
+    def sample_tasks(self, num_tasks,
+                     mode: str="uniform"):
+        """Sample a list of `num_tasks` tasks. Tasks are uniformly distributed on circle with radius 1.
 
         Args:
             num_tasks (int): Number of tasks to sample.
@@ -197,8 +198,13 @@ class PointEnv(Environment):
                 point in 2D space.
 
         """
-        angles = np.random.uniform(0, 2 * math.pi, num_tasks)
-        radius=2
+        if mode=="uniform":
+            angles = np.random.uniform(0, 2 * math.pi, num_tasks)
+        elif mode=="linspace":
+            angles = np.linspace(0, 2 * math.pi, num_tasks, endpoint=False)
+        else:
+            raise ValueError(f"Unknown mode: {mode}")
+        radius=1
         x = radius * np.cos(angles)
         y = radius * np.sin(angles)
         goals = [np.array([x[i], y[i]]) for i in range(num_tasks)]
