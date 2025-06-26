@@ -4,7 +4,6 @@ import click
 import sys
 import os
 import wandb
-import cloudpickle
 
 sys.path.append(os.path.abspath(os.getcwd()))
 
@@ -15,8 +14,8 @@ from garage.experiment.deterministic import set_seed
 from garage.experiment.task_sampler import SetTaskSampler
 from garage.sampler import LocalSampler
 from garage.torch import set_gpu_mode
-from garage.torch.algos import GeoMeta
-from garage.torch.algos.geometa import PEARLWorker
+from garage.torch.algos import CLMETA
+from garage.torch.algos.pearl import PEARLWorker
 from garage.torch.embeddings import MLPEncoder
 from garage.torch.policies import (CLContextConditionedPolicy,
                                    TanhGaussianMLPPolicy)
@@ -45,8 +44,7 @@ default_config={
     "seed": 1,
     "num_epochs": 10,
     "num_train_tasks": 2,
-    "num_transport_tasks": 5,
-    "num_test_tasks": 50,
+    "num_test_tasks": 5,
     "latent_size": 2,
     "encoder_hidden_size": 256,
     "net_size": 256,
@@ -67,14 +65,12 @@ default_config={
 }
 
 custom_config={
-    "num_epochs": 20,
-    "num_train_tasks": 2,
-    "num_transport_tasks": 1,
-    }
+    "num_train_tasks": 1,
+}
 
 config = {**default_config, **custom_config}
 
-wandb.init(project="GEO_point_env",
+wandb.init(project="CL_point_env",
            entity="pnitschke",
            name="_".join(f"{key}:{value}" for key, value in custom_config.items()) if custom_config else "VanillaConfig",
            config=config)
@@ -85,7 +81,6 @@ def CL_point_env(ctxt=None,
                              seed=config["seed"],
                              num_epochs=config["num_epochs"],
                              num_train_tasks=config["num_train_tasks"],
-                             num_transport_tasks=config["num_transport_tasks"],
                              num_test_tasks=config["num_test_tasks"],
                              latent_size=config["latent_size"],
                              encoder_hidden_size=config["encoder_hidden_size"],
@@ -104,7 +99,7 @@ def CL_point_env(ctxt=None,
                              max_episode_length=config["max_episode_length"],
                              use_gpu=config["use_gpu"],
                              weight_embedding_loss_continuity=config["weight_embedding_loss_continuity"]):
-    """Train PEARL with ML1 environments.
+    """Train a constractive learning + SAC agent in point environments.
 
     Args:
         ctxt (garage.experiment.ExperimentContext): The experiment
@@ -139,35 +134,27 @@ def CL_point_env(ctxt=None,
 
     """
     set_seed(seed)
-    # encoder_hidden_sizes = (encoder_hidden_size, encoder_hidden_size,
-                            # encoder_hidden_size)
-    encoder_hidden_sizes = ()
+    encoder_hidden_sizes = (encoder_hidden_size, encoder_hidden_size,
+                            encoder_hidden_size)
 
     env_sampler = SetTaskSampler(
         PointEnv,
         wrapper=lambda env, _: normalize(
             env))
     env = env_sampler.sample(num_train_tasks)
-    transport_env_sampler = SetTaskSampler(
-        PointEnv,
-        wrapper=lambda env, _: normalize(
-            env))
-    transport_envs = transport_env_sampler.sample(num_transport_tasks)
     test_env_sampler = SetTaskSampler(
         PointEnv,
         wrapper=lambda env, _: normalize(
             env))
-    test_envs = test_env_sampler.sample(num_test_tasks)
-    del env_sampler, transport_env_sampler, test_env_sampler
 
     trainer = Trainer(ctxt)
 
     # instantiate networks
-    augmented_env = GeoMeta.augment_env_spec(env[0](), latent_size)
+    augmented_env = CLMETA.augment_env_spec(env[0](), latent_size)
     qf = ContinuousMLPQFunction(env_spec=augmented_env,
                                 hidden_sizes=[net_size, net_size, net_size])
 
-    vf_env = GeoMeta.get_env_spec(env[0](), latent_size, 'vf')
+    vf_env = CLMETA.get_env_spec(env[0](), latent_size, 'vf')
     vf = ContinuousMLPQFunction(env_spec=vf_env,
                                 hidden_sizes=[net_size, net_size, net_size])
 
@@ -180,7 +167,7 @@ def CL_point_env(ctxt=None,
                            n_workers=1,
                            worker_class=PEARLWorker)
 
-    geometa = GeoMeta(
+    clmeta = CLMETA(
         env=env,
         policy_class=CLContextConditionedPolicy,
         encoder_class=MLPEncoder,
@@ -196,8 +183,7 @@ def CL_point_env(ctxt=None,
         n_negative_samples=n_negative_samples,
         weight_embedding_loss_continuity=weight_embedding_loss_continuity,
         encoder_hidden_sizes=encoder_hidden_sizes,
-        test_envs=test_envs,
-        transport_envs=transport_envs,
+        test_env_sampler=test_env_sampler,
         meta_batch_size=meta_batch_size,
         num_steps_per_epoch=num_steps_per_epoch,
         num_initial_steps=num_initial_steps,
@@ -210,20 +196,11 @@ def CL_point_env(ctxt=None,
         reward_scale=reward_scale,
     )
 
-    #Save training and test environments
-    log_dir = trainer._snapshotter.snapshot_dir
-    with open(os.path.join(log_dir, "train_envs.pkl"), "wb") as f:
-        cloudpickle.dump(env, f)
-    with open(os.path.join(log_dir, "transport_envs.pkl"), "wb") as f:
-        cloudpickle.dump(transport_envs, f)
-    with open(os.path.join(log_dir, "test_envs.pkl"), "wb") as f:
-        cloudpickle.dump(test_envs, f)
-
     set_gpu_mode(use_gpu, gpu_id=0)
     if use_gpu:
-        geometa.to()
+        clmeta.to()
 
-    trainer.setup(algo=geometa, env=env[0]())
+    trainer.setup(algo=clmeta, env=env[0]())
 
     trainer.train(n_epochs=num_epochs, batch_size=batch_size)
 
