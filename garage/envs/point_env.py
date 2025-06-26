@@ -92,7 +92,8 @@ class PointEnv(Environment):
         self._point = np.zeros_like(self._goal)
         dist = np.linalg.norm(self._point - self._goal)
 
-        first_obs = np.concatenate([self._point, (dist, )]).astype(np.float32)
+        first_obs = self._point.copy()
+        # first_obs = np.concatenate([self._point, (dist, )]).astype(np.float32)
         self._step_cnt = 0
 
         return first_obs, dict(goal=self._goal)
@@ -139,7 +140,8 @@ class PointEnv(Environment):
         # sometimes we don't want to terminate
         done = succ and not self._never_done
 
-        obs = np.concatenate([self._point, (dist, )]).astype(np.float32)
+        obs = self._point.copy()
+        # obs = np.concatenate([self._point, (dist, )]).astype(np.float32)
 
         self._step_cnt += 1
 
