@@ -115,7 +115,7 @@ def _compute_pointwise_basis(kernel_vectors: dict[int, torch.tensor],
             count_no_tangents+=1
         elif len(kernel_vectors_point) == 1:
             # Only one non-trivial kernel vector, use this as approximation of the kernel at p.
-            basis[idx_sample] = torch.nn.functional.normalize(kernel_vectors_point, p=2, dim=1)
+            # basis[idx_sample] = torch.nn.functional.normalize(kernel_vectors_point, p=2, dim=1)
             count_one_tangent+=1
         else:
             # There exists at least two non-trivial kernel vectors, compute a basis of dimension SYMMETRY_DIM of the Kernel distribution at the sample, normalized to have unit norm.
