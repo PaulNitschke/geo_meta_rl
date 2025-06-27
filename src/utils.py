@@ -1,8 +1,14 @@
+import pickle
+
+import numpy as np
+import torch as th
 import gym
 from gym import spaces
+
 from garage import EnvStep
-import numpy as np
 from garage import StepType
+
+import warnings
 
 class GarageToGymWrapper(gym.Env):
     """Converts a garage environment into a gym environment which can be used by Stable Baselines."""
@@ -36,3 +42,34 @@ class GarageToGymWrapper(gym.Env):
 
     def close(self):
         self._env.close()
+
+
+def load_replay_buffer(path: str,
+                        N_steps: int) -> dict:
+    """
+    Load a stable-baselines3 replay buffer from a file.
+    
+    :param path: Path to the replay buffer file.
+    :param N_steps: Number of steps to load from the replay buffer.
+
+    :return: dict containing observations, actions, rewards, next_observations, and dones.
+    """
+
+    with open(path, 'rb') as file:
+        replay_buffer = pickle.load(file)
+
+    def clean_array(array: np.array) -> th.tensor:
+        """Keeps the first N_steps, flattens the array along the number of environments dimension.
+        array: np.array of shape (replay_buffer_size, num_envs, ...)."""
+        tensor= th.tensor(array[:N_steps], dtype=th.float32)
+        return tensor.flatten(start_dim=0, end_dim=1)
+
+    if (replay_buffer.observations[N_steps,:,:]==0).all():
+        warnings.warn("Replay buffer contains more samples than selected.")
+
+
+    return {'observations': clean_array(replay_buffer.observations),
+            'actions': clean_array(replay_buffer.actions),
+            'rewards': clean_array(replay_buffer.rewards),
+            'next_observations': clean_array(replay_buffer.next_observations),
+            'dones': clean_array(replay_buffer.dones)}

@@ -5,29 +5,32 @@ from tqdm import tqdm
 import torch
 
 class DiffGenerator():
-    """Learns a differential generator given pointwise bases of the Kernel."""
 
     def __init__(self,
                  g_0, 
                  p, 
                  bases,
-                 batch_size: int,
                  n_steps: int,
-                 optimizer,
+                 optimizer: torch.optim.Optimizer,
+                 batch_size: int=64,
                  random_seed: int=None,
-                 track_hessian: bool=False):
+                 track_hessian: bool=False
+                 ):
         """
-        Learns a maximal symmetry from point-wise bases.
+        Let f: M \rightarrow \mathbbR be smooth and D^f be its d-dimensional Kernel. 
+        Given samples D^f(p), p \in M, this class learns a linear Kernel tensor g such that: g \cdot p = D^f(p) by minimizing the orthogonal complement.
+        If we are interested in symmetry discovery, g is the infinitesimal generator of a symmetry group G acting on M.
 
         Args:
-        - g_0: torch.tensor, initialization of the infinitesimal generator
-        - p: torch.tensor, samples
-        - bases: torch.tensor, point-wise bases
+        - g_0: torch.tensor of shape (d, |M|, |M|), initialization of the kernel distribution, must support autodiff.
+        - p: torch.tensor of shape (n_samples, |M|), samples from the manifold M.
+        - bases: dict where the key is is index of the sample p and the value is a torch.tensor of shape (d, |M|), point-wise samples from D^f.
+        - n_steps: int, number of maximum gradient steps.
+        - Optimizer: torch.optim.Optimizer, optimizer to use for the generator.
         - batch_size: int
-        - n_steps: int, number of gradient steps
-                         false may learn subsymmetry but more stable while true learns maximal symmetry but less stable)
         - track_hessian: bool, whether to track the hessian of the loss function
         """
+
         
         self.g = g_0
         self.p = p
@@ -50,7 +53,9 @@ class DiffGenerator():
             random.seed(random_seed)
             torch.manual_seed(random_seed)
 
-        warnings.warn("Differential Generator is not Normalized During Training")
+        self._validate_inputs()
+
+        warnings.warn("TODO: Differential Generator is not Normalized During Training")
 
     def orthogonal_projec(self,
                           infinitesimal_generator, 
@@ -127,6 +132,8 @@ class DiffGenerator():
         loss.backward()
         self.optimizer_diff.step()
 
+        return loss
+
     
     def _compute_loss_diff(self, generator, p_batch, bases_batch, track_losses: bool=False):
         """Computes Main loss: projects generator into kernel and kernel into generator."""
@@ -183,10 +190,22 @@ class DiffGenerator():
         return p_batch, bases_batch
     
 
+    def _validate_inputs(self):
+        """Validate inputs."""
+        warnings.warn("TODO: only learns linear Kernel distributions.")
+        warnings.warn("TODO: Implement early stopping in Kernel learning.")
+
+        assert self.g.shape[1] == self.p.shape[1], "g_0 must have the same number of dimensions as p."
+        assert self.g.shape[2] == self.p.shape[1], "g_0 must have the same number of dimensions as p."
+        assert isinstance(self.optimizer_diff, torch.optim.Optimizer), "Optimizer must be a torch.optim.Optimizer."
+    
+
     def optimize(self):
         """Main Optimization Loop."""
-        for _ in tqdm(range(self._n_steps)):
+        _loss=torch.inf
+        progress_bar = tqdm(range(self._n_steps), desc="Training")
 
+        for _ in progress_bar:
             #Sample data
             p_batch, bases_batch = self._sample_data_diff(n_samples=self._batch_size)
 
@@ -195,7 +214,8 @@ class DiffGenerator():
                 self.hessians.append(self._compute_hessian(self.g, p_batch, bases_batch))
                 self.gs.append(self.g.detach().clone())
 
-            self.take_one_gradient_step_diff(generator=self.g, p_batch=p_batch, bases_batch=bases_batch)
+            _loss = self.take_one_gradient_step_diff(generator=self.g, p_batch=p_batch, bases_batch=bases_batch)
+            progress_bar.set_description(f"Loss: {_loss.item():.4e}")
 
 
         return self.g_norm
