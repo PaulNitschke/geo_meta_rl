@@ -27,12 +27,14 @@ class PointEnv(Environment):
                  arena_size=5.,
                  done_bonus=0.,
                  never_done=False,
-                 max_episode_length=100):
+                 max_episode_length=100,
+                 sigma_noise:float=0.05):
         goal = np.array(goal, dtype=np.float32)
         self._goal = goal
         self._done_bonus = done_bonus
         self._never_done = never_done
         self._arena_size = arena_size
+        self._sigma_noise = sigma_noise
 
         assert ((goal >= -arena_size) & (goal <= arena_size)).all()
 
@@ -90,6 +92,8 @@ class PointEnv(Environment):
 
         """
         self._point = np.zeros_like(self._goal)
+        self._point += np.random.normal(
+            loc=0.0, scale=self._sigma_noise, size=self._point.shape)
         dist = np.linalg.norm(self._point - self._goal)
 
         first_obs = self._point.copy()
@@ -120,8 +124,12 @@ class PointEnv(Environment):
         a = action.copy()  # NOTE: we MUST copy the action before modifying it
         a = np.clip(a, self.action_space.low, self.action_space.high)
 
+        # Transition function, additive normally distributed noise
         self._point = np.clip(self._point + a, -self._arena_size,
                               self._arena_size)
+        self._point += np.random.normal(
+            loc=0.0, scale=self._sigma_noise, size=self._point.shape)
+
         if self._visualize:
             print(self.render('ascii'))
 

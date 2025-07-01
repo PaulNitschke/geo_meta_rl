@@ -61,8 +61,8 @@ def load_replay_buffer(path: str,
     def clean_array(array: np.array) -> th.tensor:
         """Keeps the first N_steps, flattens the array along the number of environments dimension.
         array: np.array of shape (replay_buffer_size, num_envs, ...)."""
-        tensor= th.tensor(array[:N_steps], dtype=th.float32)
-        return tensor.flatten(start_dim=0, end_dim=1)
+        array = array[:N_steps]
+        return th.tensor(array.reshape(-1, *array.shape[2:]), dtype=th.float32)
 
     if (replay_buffer.observations[N_steps,:,:]==0).all():
         warnings.warn("Replay buffer contains more samples than selected.")
@@ -71,5 +71,4 @@ def load_replay_buffer(path: str,
     return {'observations': clean_array(replay_buffer.observations),
             'actions': clean_array(replay_buffer.actions),
             'rewards': clean_array(replay_buffer.rewards),
-            'next_observations': clean_array(replay_buffer.next_observations),
-            'dones': clean_array(replay_buffer.dones)}
+            'next_observations': clean_array(replay_buffer.next_observations)}
