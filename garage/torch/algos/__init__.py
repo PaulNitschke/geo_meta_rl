@@ -17,7 +17,7 @@ from garage.torch.algos.maml_trpo import MAMLTRPO
 from garage.torch.algos.sac import SAC
 from garage.torch.algos.mtsac import MTSAC
 from garage.torch.algos.pearl import PEARL
-from garage.torch.algos.CLMeta import CLMETA
+from garage.torch.algos.custom.CLMeta import CLMETA
 
 __all__ = [
     'BC', 'DDPG', 'DQN', 'VPG', 'PPO', 'TD3', 'TRPO', 'MAMLPPO', 'MAMLTRPO',

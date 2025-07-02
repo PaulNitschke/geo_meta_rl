@@ -89,9 +89,7 @@ class CLContextConditionedPolicy(nn.Module):
             z = [d.rsample() for d in posteriors]
             self.z = F.normalize(torch.stack(z), p=2, dim=1)
         else:
-            # self.z = self.z_means 
             self.z = F.normalize(self.z_means, p=2, dim=1)
-            #TODO, how about we dont sample from a normal distributution here but rather a point on the unit circle? Then we could show that uncertainty increases the further we stray away from 
 
     def update_context(self, timestep):
         """Append single transition to the current context.
@@ -177,6 +175,7 @@ class CLContextConditionedPolicy(nn.Module):
         self.infer_posterior(context)
         self.sample_from_belief()
         task_z = self.z
+        # assert np.isclose(self.z.detach().cpu().numpy(), np.array([-0.8671, 0.4981]), atol=1e-3).all() or np.isclose(self.z.detach().cpu().numpy(), np.array([0, 0]), atol=1e-3).all(), "self.z: {}".format(self.z.detach().cpu().numpy())
 
         # task, batch
         t, b, _ = obs.size()
@@ -212,6 +211,7 @@ class CLContextConditionedPolicy(nn.Module):
 
         """
         z = self.z
+        # assert np.isclose(self.z.detach().cpu().numpy(), np.array([-0.8671, 0.4981]), atol=1e-3).all() or np.isclose(self.z.detach().cpu().numpy(), np.array([0, 0]), atol=1e-3).all(), "self.z: {}".format(self.z.detach().cpu().numpy())
         obs = torch.as_tensor(obs[None], device=global_device()).float()
         obs_in = torch.cat([obs, z], dim=1)
         action, info = self._policy.get_action(obs_in)

@@ -25,14 +25,14 @@ class PointEnv(Environment):
     def __init__(self,
                  goal=np.array((1., 1.), dtype=np.float32),
                  arena_size=5.,
-                 done_bonus=0.,
                  never_done=False,
-                 max_episode_length=100):
+                 max_episode_length=100,
+                 sigma_noise:float=0.05):
         goal = np.array(goal, dtype=np.float32)
         self._goal = goal
-        self._done_bonus = done_bonus
         self._never_done = never_done
         self._arena_size = arena_size
+        self._sigma_noise = sigma_noise
 
         assert ((goal >= -arena_size) & (goal <= arena_size)).all()
 
@@ -44,7 +44,7 @@ class PointEnv(Environment):
         self._task = {'goal': self._goal}
         self._observation_space = akro.Box(low=-np.inf,
                                            high=np.inf,
-                                           shape=(3, ),
+                                           shape=(2, ),
                                            dtype=np.float32)
         self._action_space = akro.Box(low=-0.1,
                                       high=0.1,
@@ -90,9 +90,12 @@ class PointEnv(Environment):
 
         """
         self._point = np.zeros_like(self._goal)
+        self._point += np.random.normal(
+            loc=0.0, scale=self._sigma_noise, size=self._point.shape)
         dist = np.linalg.norm(self._point - self._goal)
 
-        first_obs = np.concatenate([self._point, (dist, )])
+        first_obs = self._point.copy()
+        # first_obs = np.concatenate([self._point, (dist, )]).astype(np.float32)
         self._step_cnt = 0
 
         return first_obs, dict(goal=self._goal)
@@ -119,8 +122,12 @@ class PointEnv(Environment):
         a = action.copy()  # NOTE: we MUST copy the action before modifying it
         a = np.clip(a, self.action_space.low, self.action_space.high)
 
+        # Transition function, additive normally distributed noise
         self._point = np.clip(self._point + a, -self._arena_size,
                               self._arena_size)
+        self._point += np.random.normal(
+            loc=0.0, scale=self._sigma_noise, size=self._point.shape)
+
         if self._visualize:
             print(self.render('ascii'))
 
@@ -129,9 +136,7 @@ class PointEnv(Environment):
 
         # dense reward
         reward = -dist
-        # done bonus
-        if succ:
-            reward += self._done_bonus
+
         # Type conversion
         if not isinstance(reward, float):
             reward = float(reward)
@@ -139,7 +144,8 @@ class PointEnv(Environment):
         # sometimes we don't want to terminate
         done = succ and not self._never_done
 
-        obs = np.concatenate([self._point, (dist, )])
+        obs = self._point.copy()
+        # obs = np.concatenate([self._point, (dist, )]).astype(np.float32)
 
         self._step_cnt += 1
 
@@ -183,8 +189,9 @@ class PointEnv(Environment):
         """Close the env."""
 
     # pylint: disable=no-self-use
-    def sample_tasks(self, num_tasks):
-        """Sample a list of `num_tasks` tasks. Tasks are uniformly distributed on circle with radius 2.
+    def sample_tasks(self, num_tasks,
+                     mode: str="uniform"):
+        """Sample a list of `num_tasks` tasks. Tasks are uniformly distributed on circle with radius 1.
 
         Args:
             num_tasks (int): Number of tasks to sample.
@@ -195,8 +202,13 @@ class PointEnv(Environment):
                 point in 2D space.
 
         """
-        angles = np.linspace(0, 2 * np.pi, num_tasks, endpoint=False)
-        radius=2
+        if mode=="uniform":
+            angles = np.random.uniform(0, 2 * math.pi, num_tasks)
+        elif mode=="linspace":
+            angles = np.linspace(0, 2 * math.pi, num_tasks, endpoint=False)
+        else:
+            raise ValueError(f"Unknown mode: {mode}")
+        radius=1
         x = radius * np.cos(angles)
         y = radius * np.sin(angles)
         goals = [np.array([x[i], y[i]]) for i in range(num_tasks)]

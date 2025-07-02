@@ -6,6 +6,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 from io import BytesIO
+import copy
+import torch.nn.functional as F
+from matplotlib.colors import Normalize
+
 
 from garage import EpisodeBatch, log_multitask_performance
 from garage.experiment.deterministic import get_seed
@@ -119,10 +123,11 @@ class MetaEvaluator:
                                                 env_up)
                 for _ in range(self._n_exploration_eps)
             ])
-            adapted_policy = algo.adapt_policy(policy, eps)
-            if self._hard_coded_embeddings is not None:
-                adapted_policy.z = self._hard_coded_embeddings[idx_env_up]
-            task_embedding = algo.policy.z.detach().cpu().numpy()
+            if self._hard_coded_embeddings is None:
+                adapted_policy = algo.adapt_policy(policy, eps)
+            else:
+                adapted_policy = algo.adapt_policy(policy, F.normalize(self._hard_coded_embeddings[idx_env_up], p=2))          
+            task_embedding = adapted_policy.z.detach().cpu().numpy()
             task_embeddings.append(task_embedding)
             adapted_eps = self._test_sampler.obtain_samples(
                 self._eval_itr,
@@ -146,7 +151,7 @@ class MetaEvaluator:
 
         #wandb logging
         if self._log_wandb:
-            rollouts_img = self.rollout_plotter(adapted_episodes)
+            rollouts_img = self.rollout_plotter(adapted_episodes, title=self._prefix)
             wandb.log({f'{self._prefix}/rollouts': wandb.Image(rollouts_img)})
             for idx, embedding in enumerate(task_embeddings):
                 print("embedding: ", embedding)
@@ -163,38 +168,111 @@ class MetaEvaluator:
         else:
             return adapted_episodes
 
-    def rollout_plotter(self, trajectories): #TODO, this should be an input to the class
-        # Create a new figure
-        fig, ax = plt.subplots()
+    # def rollout_plotter(self, trajectories): #TODO, this should be an input to the class
+    #     # Create a new figure
+    #     fig, ax = plt.subplots()
+    #     ax.set_aspect('equal', adjustable='box')
+        
+    #     # Plot circle
+    #     circle = plt.Circle((0, 0), 2, color='r', fill=False, linestyle='--')
+    #     ax.add_artist(circle)
+        
+    #     # Set plot limits
+    #     ax.set_xlim(-5, 5)
+    #     ax.set_ylim(-5, 5)
+        
+    #     # Plot trajectories
+    #     colors = ['blue', 'green', 'orange', 'purple', 'brown']
+    #     for idx_task, task_traj in enumerate(trajectories):
+    #         ax.plot(task_traj.observations[:, 0], task_traj.observations[:, 1], label=f"Task {idx_task}", color=colors[idx_task])
+    #         ax.scatter(task_traj.env_infos["task"][0]["goal"][0], task_traj.env_infos["task"][0]["goal"][1], 
+    #                 color=colors[idx_task], marker='x', label=f'Goal Task {idx_task}')
+        
+    #     # Plot origin
+    #     ax.scatter(0, 0, color='black', marker='x', label='Origin')
+        
+    #     # Add legend
+    #     ax.legend(ncol=3)
+        
+    #     # Save plot to a BytesIO buffer
+    #     buf = BytesIO()
+    #     plt.savefig(buf, format='png')
+    #     plt.close(fig)  # Close the figure to free memory
+    #     buf.seek(0)  # Reset the buffer position to the start
+        
+    #     # Convert buffer to PIL Image
+    #     image = Image.open(buf)
+    #     return image
+    
+    def rollout_plotter(self,
+                             trajs, 
+                             title,
+                            add_legend: bool = False):
+        # Create a colormap and normalizer
+        cmap = plt.cm.hsv  # Use the hsv colormap
+        norm = Normalize(vmin=0, vmax=2 * np.pi)
+
+        # Generate points for the circle
+        angles = np.linspace(0, 2 * np.pi, 500)
+        x_circle = 2 * np.cos(angles)
+        y_circle = 2 * np.sin(angles)
+
+        # Create the figure and axis
+        fig = plt.figure(figsize=(12, 12))  # Increase figure size for wider space around the circle
+        ax = fig.add_subplot(111)
+
+        # Set the fixed size for the circle area (8x8 inches)
+        circle_size_inches = 8
+        fig_width, fig_height = fig.get_size_inches()
+
+        # Calculate the position for the circle to take up exactly 8x8 inches
+        left_margin = (fig_width - circle_size_inches) / 2 / fig_width
+        bottom_margin = (fig_height - circle_size_inches) / 2 / fig_height
+        ax_width = circle_size_inches / fig_width
+        ax_height = circle_size_inches / fig_height
+
+        ax.set_position([left_margin, bottom_margin, ax_width, ax_height])  # Adjust axis position
+
+        # Set fixed aspect ratio and limits
         ax.set_aspect('equal', adjustable='box')
-        
-        # Plot circle
-        circle = plt.Circle((0, 0), 2, color='r', fill=False, linestyle='--')
-        ax.add_artist(circle)
-        
-        # Set plot limits
-        ax.set_xlim(-5, 5)
-        ax.set_ylim(-5, 5)
-        
+        ax.set_xlim(1.2, 1.2)  # Add more padding around the circle
+        ax.set_ylim(1.2, 1.2)  # Add more padding around the circle
+
+        # Add grid in the background
+        ax.grid(True, linestyle='--', linewidth=0.5, alpha=0.7, color='gray')
+
+        # Plot the circle with continuous color
+        for i in range(len(angles) - 1):
+            ax.plot(x_circle[i:i + 2], y_circle[i:i + 2], color=cmap(norm(angles[i])), linewidth=2, alpha=0.4)
+
         # Plot trajectories
-        colors = ['blue', 'green', 'orange', 'purple', 'brown']
-        for idx_task, task_traj in enumerate(trajectories):
-            ax.plot(task_traj.observations[:, 0], task_traj.observations[:, 1], label=f"Task {idx_task}", color=colors[idx_task])
-            ax.scatter(task_traj.env_infos["task"][0]["goal"][0], task_traj.env_infos["task"][0]["goal"][1], 
-                    color=colors[idx_task], marker='x', label=f'Goal Task {idx_task}')
-        
-        # Plot origin
-        ax.scatter(0, 0, color='black', marker='x', label='Origin')
-        
-        # Add legend
-        ax.legend(ncol=3)
-        
+        for task_traj in trajs:
+            goal_x, goal_y = task_traj.env_infos["task"][0]["goal"]
+            goal_angle = (np.arctan2(goal_y, goal_x) + 2 * np.pi) % (2 * np.pi)
+
+            goal_color = cmap(norm(goal_angle))
+            ax.plot(task_traj.observations[:, 0], task_traj.observations[:, 1], c=goal_color, alpha=0.7)
+
+        # Plot markers for task goals
+        for marker_traj in trajs:
+            goal_x, goal_y = marker_traj.env_infos["task"][0]["goal"]
+            goal_angle = (np.arctan2(goal_y, goal_x) + 2 * np.pi) % (2 * np.pi)
+
+            goal_color = cmap(norm(goal_angle))
+            ax.scatter(goal_x, goal_y, color=goal_color, marker='x', s=100)
+
+        if add_legend:
+            ax.scatter([], [], color='black', marker='x', label='Task Goal')
+            ax.plot([], [], color='black', label='Task Trajectory')
+            ax.legend(ncol=2, loc='lower center', bbox_to_anchor=(0.48, -0.05), frameon=False, fontsize=25)
+            plt.title(title, fontsize=35, pad=20)
+        # Turn off the axis
+        ax.axis('off')
+
         # Save plot to a BytesIO buffer
         buf = BytesIO()
-        plt.savefig(buf, format='png')
-        plt.close(fig)  # Close the figure to free memory
-        buf.seek(0)  # Reset the buffer position to the start
-        
-        # Convert buffer to PIL Image
+        plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
+        plt.close(fig)
+        buf.seek(0)
         image = Image.open(buf)
         return image
