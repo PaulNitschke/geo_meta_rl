@@ -8,6 +8,7 @@ import numpy as np
 import pickle
 from scipy.spatial import KDTree
 import torch
+import faiss
 
 from constants import DTYPE
 
@@ -37,6 +38,7 @@ class KernelFrameEstimator():
         self.epsilon_ball = epsilon_ball
         self.epsilon_level_set = epsilon_level_set
         self.pointwise_frame = {}
+        self._finished_setup_evaluation=False
 
 
     def compute(self) -> dict[int, torch.tensor]:
@@ -66,7 +68,45 @@ class KernelFrameEstimator():
         """Sets the pointwise frame of the kernel distribution."""
         self.pointwise_frame = frame
 
-    
+
+    def setup_evaluation(self, k, bandwidth, precompute_knn_and_weights:bool=False):
+
+        self.known_idx = torch.tensor(list(self.pointwise_frame.keys()))
+        self.known_ps = self.ps[self.known_idx]
+        self.known_frames = torch.stack([self.pointwise_frame[int(i)] for i in self.known_idx])
+
+        # Implements an approximate k-nn graph.
+        self.index = faiss.IndexFlatL2(self.known_ps.shape[1])
+        self.index.add(self.known_ps.cpu().numpy())
+
+        if precompute_knn_and_weights:
+            self.knns=torch.zeros((len(self.known_ps), k), dtype=torch.int64)
+            self.weights=torch.zeros((len(self.known_ps), k), dtype=DTYPE)
+
+
+            def compute_knn_and_weights(idx):
+                """Helper function that computes the k-nearest neighbors and their weights for all points in the dataset."""
+                p= self.ps[idx]
+                dist = torch.cdist(p[None], self.known_ps)[0]
+                if k < len(dist):
+                    knn_idx = dist.topk(k, largest=False).indices
+                else:
+                    knn_idx = torch.cat(torch.arange(len(dist)), idx.repeat(k - len(dist)))
+
+                weights = torch.exp(-dist[knn_idx]**2 / (2 * bandwidth**2))
+                weights = weights / weights.sum()
+                return knn_idx, weights
+            
+
+            # Precompute the k-nearest neighbors and their weights for all points in the dataset.
+            for idx in tqdm(range(len(self.known_ps)), desc="Precomputing k-NN and weights..."):
+                knn_idx, weights = compute_knn_and_weights(idx)
+                self.knns[idx] = knn_idx
+                self.weights[idx] = weights
+
+        self._finished_setup_evaluation=True
+
+
     def evaluate(self, 
                  p: torch.tensor,
                  k: int,
@@ -77,25 +117,23 @@ class KernelFrameEstimator():
             k: int, number of nearest neighbors to consider for the kernel approximation.
             bandwidth: float, bandwidth of the Gaussian kernel.
         """
+        assert self._finished_setup_evaluation, "KernelFrameEstimator must be setup for evaluation before calling evaluate(). Call setup_evaluation() first."
 
-        self.known_idx = torch.tensor(list(self.pointwise_frame.keys()))
-        self.known_ps = self.ps[self.known_idx]
-        self.known_frames = torch.stack([self.pointwise_frame[int(i)] for i in self.known_idx])
+        # Get nearest neighbors
+        _, knn_idx = self.index.search(p[None].cpu().numpy(), k)
+        knn_idx = torch.from_numpy(knn_idx[0]).to(self.known_ps.device)
+        knn_ps = self.known_ps[knn_idx]
+        dist = torch.norm(knn_ps - p, dim=1)
 
-        dist = torch.cdist(p[None], self.known_ps)[0]
-        if k < len(dist):
-            knn_idx = dist.topk(k, largest=False).indices
-        else:
-            knn_idx = torch.arange(len(dist))
-
-        weights = torch.exp(-dist[knn_idx]**2 / (2 * bandwidth**2))
+        weights = torch.exp(-dist**2 / (2 * bandwidth**2))
         weights = weights / weights.sum()
 
         local_bases = self.known_frames[knn_idx]
         weighted = torch.einsum('i,ijk->jk', weights, local_bases)
 
-        Q, _ = torch.linalg.qr(weighted)
-        return Q[:, :self.kernel_dim]
+        U, S, Vh = torch.linalg.svd(weighted, full_matrices=False)
+        return U[:, :self.kernel_dim]
+
 
 
     def _compute_neighborhood(self, data, epsilon) -> list:
