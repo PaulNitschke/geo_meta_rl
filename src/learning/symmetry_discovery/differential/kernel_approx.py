@@ -1,32 +1,34 @@
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Optional
 import warnings
 import logging
 logging.basicConfig(level=logging.INFO)
 
 from tqdm import tqdm
 import numpy as np
+import pickle
 from scipy.spatial import KDTree
 import torch
 
 from constants import DTYPE
 
-class PointwiseKernelApproximation():
+class KernelFrameEstimator():
 
     def __init__(self,
-                 ps: torch.tensor,
-                 ns: torch.tensor,
-                 kernel_dim: int,
-                 epsilon_ball: float,
-                 epsilon_level_set: float):
+                ps: torch.Tensor,
+                kernel_dim: int,
+                ns: Optional[torch.Tensor] = None,
+                epsilon_ball: Optional[float] = None,
+                epsilon_level_set: Optional[float] = None):
         
-        """Computes pointwise bases of a kernel of a function f: M \rightarrow N by performing a first degree Taylor expansion of f.
+        """Computes pointwise bases (a frame) of a kernel of a function f: M \rightarrow N by performing a first degree Taylor expansion of f.
         
         Args:
-        - p: torch.tensor of shape (n_samples, |M|).
-        - n: torch.tensor of shape (n_samples, |N|).
+        - ps: torch.tensor of shape (n_samples, |M|).
         - kernel_dim: int, dimension of the kernel
-        - epsilon_ball: float, radius of ball on which we Taylor approximate f.
+        - ns: torch.tensor of shape (n_samples, |N|). Not required for inference only.
+        - epsilon_ball: float, radius of ball on which we Taylor approximate f. Not required for inference only.
         - epsilon_level_set: float, up to what tolerance are p,p' in the same level set, e.g. |f(p)-f(p')|< epsilon_level_set. Generally, epsilon_level_set should be smaller than epsilon_ball
+                                Not required for inference only.
         """
 
         self.ps = ps
@@ -34,6 +36,7 @@ class PointwiseKernelApproximation():
         self.kernel_dim = kernel_dim
         self.epsilon_ball = epsilon_ball
         self.epsilon_level_set = epsilon_level_set
+        self.pointwise_frame = {}
 
 
     def compute(self) -> dict[int, torch.tensor]:
@@ -44,9 +47,55 @@ class PointwiseKernelApproximation():
             - keys: indices of each data sample where the kernel frame could be computed.
             - values: basis vectors of shape (kernel_dim, |M])
         """
+        assert self.ns is not None, "Kernel approximation requires a readout of the function f at each point p."
+        assert self.epsilon_ball is not None, "Kernel approximation requires a radius of the ball on which we Taylor approximate f."
+        assert self.epsilon_level_set is not None, "Kernel approximation requires a tolerance level for the level set of f."
+
         warnings.warn("TODO: Dimension of kernel should be actively inferred, not passed as an argument.")
         kernel_vectors, _ = self._compute_kernel_samples(self.ps, self.ns, self.epsilon_ball, self.epsilon_level_set)
         return self._compute_pointwise_basis(kernel_vectors=kernel_vectors, kernel_dim=self.kernel_dim)
+    
+
+    def save(self, file_name:str):
+        """Saves the frame samples to file."""
+        with open(file_name, 'wb') as f:
+            pickle.dump(self.pointwise_frame, f)
+
+    
+    def set_frame(self, frame: dict[int, torch.tensor]):
+        """Sets the pointwise frame of the kernel distribution."""
+        self.pointwise_frame = frame
+
+    
+    def evaluate(self, 
+                 p: torch.tensor,
+                 k: int,
+                 bandwidth:float) -> torch.tensor:
+        """Computes a frame of the kernel distribution at a new point p via a Gaussian kernel.
+        Args:
+            p: torch.tensor of shape (|M|,), the point at which to evaluate the kernel frame.
+            k: int, number of nearest neighbors to consider for the kernel approximation.
+            bandwidth: float, bandwidth of the Gaussian kernel.
+        """
+
+        self.known_idx = torch.tensor(list(self.pointwise_frame.keys()))
+        self.known_ps = self.ps[self.known_idx]
+        self.known_frames = torch.stack([self.pointwise_frame[int(i)] for i in self.known_idx])
+
+        dist = torch.cdist(p[None], self.known_ps)[0]
+        if k < len(dist):
+            knn_idx = dist.topk(k, largest=False).indices
+        else:
+            knn_idx = torch.arange(len(dist))
+
+        weights = torch.exp(-dist[knn_idx]**2 / (2 * bandwidth**2))
+        weights = weights / weights.sum()
+
+        local_bases = self.known_frames[knn_idx]
+        weighted = torch.einsum('i,ijk->jk', weights, local_bases)
+
+        Q, _ = torch.linalg.qr(weighted)
+        return Q[:, :self.kernel_dim]
 
 
     def _compute_neighborhood(self, data, epsilon) -> list:
@@ -98,11 +147,10 @@ class PointwiseKernelApproximation():
         for idx_sample, sample in tqdm(enumerate(ps), desc="Compute pointwise kernel samples...", total=len(ps)):
             kernel_vectors[idx_sample] = torch.zeros((len(self.local_level_set[idx_sample]), n_features), dtype=DTYPE)
 
-            # for idx, neighbor_idx in enumerate(self.local_level_set[idx_sample]):
-            #     kernel_vectors[idx_sample][idx] = ps[neighbor_idx] - sample
-
             neighbors = self.local_level_set[idx_sample]
             diffs = ps[neighbors] - sample
+
+
             _norms= torch.linalg.norm(diffs, dim=1, keepdim=True)
             diffs = torch.where(_norms > 0, diffs / _norms, diffs)
             kernel_vectors[idx_sample] = diffs
@@ -123,7 +171,6 @@ class PointwiseKernelApproximation():
         Returns:
             basis: dictonary of length (n_samples,), each key is the index of a sample and the value is a tensor of shape (n_kernel_vectors, n_features) containing a basis of the kernel distribution at the
         """
-        basis = {}
         count_no_tangents, count_one_tangent, count_multiple_tangents = 0,0,0
         n_samples = len(kernel_vectors.keys())
         for idx_sample in tqdm(kernel_vectors.keys(), desc="Compute Point-Wise Bases via PCA..."):
@@ -134,17 +181,14 @@ class PointwiseKernelApproximation():
                 count_no_tangents+=1
             elif len(kernel_vectors_point) == 1:
                 # Only one non-trivial kernel vector, use this as approximation of the kernel at p.
-                # basis[idx_sample] = torch.nn.functional.normalize(kernel_vectors_point, p=2, dim=1)
+                # self.pointwise_frame[idx_sample] = torch.nn.functional.normalize(kernel_vectors_point, p=2, dim=1)
                 count_one_tangent+=1
             else:
                 # There exists at least two non-trivial kernel vectors, compute a basis of dimension SYMMETRY_DIM of the Kernel distribution at the sample, normalized to have unit norm.
                 _, _, _basis_vector = torch.pca_lowrank(kernel_vectors_point, q=kernel_dim)
-                # _basis_vector = _basis_vector.T # PCA returns a vector of shape (1, n_features), we want it to be of shape (n_features, 1)
-                # basis[idx_sample] = torch.nn.functional.normalize(_basis_vector, p=2, dim=1).flatten()
-                basis[idx_sample] = _basis_vector
+                self.pointwise_frame[idx_sample] = _basis_vector
                 count_multiple_tangents+=1
-                if idx_sample==55:
-                    breakpoint=True
+
             
         logging.info(
             f"Computed kernel bases from:\n"
@@ -152,4 +196,4 @@ class PointwiseKernelApproximation():
             f"  - one tangent vector for {round(100 * count_one_tangent / n_samples, 2)}% of samples (okay)\n"
             f"  - no tangent vector for {round(100 * count_no_tangents / n_samples, 2)}% of samples (not good, no basis)."
         )
-        return basis
+        return self.pointwise_frame

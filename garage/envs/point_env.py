@@ -25,13 +25,11 @@ class PointEnv(Environment):
     def __init__(self,
                  goal=np.array((1., 1.), dtype=np.float32),
                  arena_size=5.,
-                 done_bonus=0.,
                  never_done=False,
                  max_episode_length=100,
                  sigma_noise:float=0.05):
         goal = np.array(goal, dtype=np.float32)
         self._goal = goal
-        self._done_bonus = done_bonus
         self._never_done = never_done
         self._arena_size = arena_size
         self._sigma_noise = sigma_noise
@@ -138,9 +136,7 @@ class PointEnv(Environment):
 
         # dense reward
         reward = -dist
-        # done bonus
-        if succ:
-            reward += self._done_bonus
+
         # Type conversion
         if not isinstance(reward, float):
             reward = float(reward)
