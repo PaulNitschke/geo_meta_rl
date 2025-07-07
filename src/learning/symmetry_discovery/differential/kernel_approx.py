@@ -75,10 +75,8 @@ class KernelFrameEstimator():
         self.known_idx = torch.tensor(list(self.pointwise_frame.keys()))
         self.known_ps = self.ps[self.known_idx]
         self.known_frames = torch.stack([self.pointwise_frame[int(i)] for i in self.known_idx])
-
-        logging.info("Setup kernel frame evaluation.")
         self._finished_setup_evaluation=True
-
+        logging.info("Setup kernel frame evaluation.")
 
     def evaluate(self, 
                     ps: torch.Tensor,
