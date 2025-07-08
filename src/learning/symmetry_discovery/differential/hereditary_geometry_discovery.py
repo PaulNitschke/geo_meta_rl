@@ -1,26 +1,46 @@
 import torch
 import warnings
 from tqdm import tqdm
+from typing import Literal, List
+
+from ....utils import approx_mode
+
 
 class HereditaryGeometryDiscovery():
 
     def __init__(self,
-                 tasks_ps: list,
-                 tasks_frameestimators: list,
+                 tasks_ps: List[torch.tensor],
+                 tasks_frameestimators: List[callable],
                  kernel_dim: int,
+                 encoder: callable=None,
+                 decoder: callable=None,
                  seed:int=42,
-                 lg_inits:torch.tensor=None,
+                 lg_inits_how:Literal['random', 'mode', 'zeros']= 'mode',
                  learn_left_actions:bool=True,
                  learn_encoder_decoder:bool=False,
                  oracle_generator: torch.tensor=None,
-                 encoder: callable=None,
-                 decoder: callable=None,
-                 base_task_idx: int=0,
                  task_specifications:list=None,
                  batch_size:int=64,
                  bandwidth:float=0.5):
+        
         """Hereditary Geometry Discovery.
-        TODO: signature.
+        This class implements hereditary symmetry discovery.
+
+        Args:
+        - tasks_ps: list of tensors, each of shape (n_samples, n).
+        - tasks_frameestimators: list of callables, given a batch of samples from the respective task, returns the frame of the kernel at these samples.
+        - kernel_dim: dimension of the kernel.
+        - encoder: callable, encodes points into latent space.
+        - decoder: callable, decodes points from latent space to ambient space.
+        - seed: random seed for reproducibility.
+        - lg_inits_how: how to initialize left actions, one of ['random', 'mode', 'zeros']. Mode computes the mode of tasks_ps and then fits a linear regression between the modes.
+        - batch_size: number of samples to use for optimization.
+        
+        - learn_left_actions: whether to learn left actions, only use for debugging.
+        - learn_encoder_decoder: whether to learn the encoder and decoder, only use for debugging.
+        - oracle_generator: tensor of shape (d, n, n), the generator to be used for symmetry discovery, only use for debugging.
+        - task_specifications: list of dictionaries, each containing the goal of the task, only used for debugging.
+
         
         Notation:
         - d: kernel dimension.
@@ -28,41 +48,49 @@ class HereditaryGeometryDiscovery():
         - b: batch size.
         - N: number of tasks.
         """
+
         
         self.tasks_ps= tasks_ps
-        self.base_task_index=base_task_idx
         self.tasks_frameestimators=tasks_frameestimators
-        self.task_specifications=task_specifications
-        assert len(tasks_ps) == len(tasks_frameestimators), "Number of tasks and frame estimators must match."
+        self.kernel_dim=kernel_dim
+        self.base_task_index=0
+        self._lg_inits_how=lg_inits_how
         self.encoder=encoder
         self.decoder=decoder
+        self.batch_size=batch_size
+        self.bandwidth=bandwidth
+
+
+        self.task_specifications=task_specifications
         self.oracle_generator= oracle_generator
         self._learn_left_actions=learn_left_actions
         self._learn_encoder_decoder=learn_encoder_decoder
 
-        self.bandwidth=bandwidth
+        self._validate_inputs()
 
-        self.kernel_dim=kernel_dim
+
         self.ambient_dim=tasks_ps[0][0,:].shape[0]
-        self.batch_size=batch_size
         self._n_tasks=len(tasks_ps)
         self._n_samples=tasks_ps[0][:,0].shape[0]
         self.task_idxs = list(range(self._n_tasks))
-        self.task_idxs.remove(base_task_idx)
+        self.task_idxs.remove(self.base_task_index)
+
 
         self._losses=[]
         self._task_losses=[]
         
 
         # Optimization variables
-        warnings.warn("Only one left base action implemented.")
         torch.manual_seed(seed)
         # self.lgs=[torch.nn.Parameter(torch.randn(self.ambient_dim, self.ambient_dim)) for _ in range(self._n_tasks-1)]  # one left-action per task minus the base task.
         # self.optimizer_lgs=[torch.optim.Adam([lg], lr=0.00035) for lg in self.lgs]  # one optimizer per left-action.
-        if lg_inits is not None:
-            assert lg_inits.shape == (self._n_tasks-1, self.ambient_dim, self.ambient_dim), "Left-action initializations must have shape (N-1, d, d)."
+        if self._lg_inits_how == 'mode':
+            approx_modes=[approx_mode(ps) for ps in tasks_ps]
+            lg_inits=[torch.linalg.lstsq(approx_modes[0].unsqueeze(0), approx_modes[i].unsqueeze(0)).solution.T for i in self.task_idxs]
+            lg_inits=torch.stack(lg_inits)
             self.lgs = torch.nn.Parameter(lg_inits)
-        else:
+            assert self.lgs.shape == (self._n_tasks-1, self.ambient_dim, self.ambient_dim), "Left actions must be of shape (N_tasks-1, d, n)."
+        elif self._lg_inits_how == 'random':
             self.lgs = torch.nn.Parameter(torch.randn(size=(self._n_tasks-1, self.ambient_dim, self.ambient_dim)))
         self.optimizer_lgs=torch.optim.Adam([self.lgs], lr=0.00035)
 
@@ -143,6 +171,8 @@ class HereditaryGeometryDiscovery():
         self.loss_symmetry= torch.norm(gen_into_frame, dim=(-1)).sum(-1).mean()
 
         self.loss_reconstruction= torch.norm(ps - self.decoder(self.encoder(gen_ps)), dim=(-1)).mean()
+
+        warnings.warn("Need to enfore that encoder and decoder are identity in the beginning. Also need to use derivative of decoder Jacobian.")
 
         return self.loss_symmetry+self.loss_reconstruction
         
@@ -228,25 +258,16 @@ class HereditaryGeometryDiscovery():
                     )
 
 
-    # def rotation_vector_field(self, x, center):
-    #     """
-    #     Compute the rotational vector field directions at a batch of 2D points around a given center.
-
-    #     Args:
-    #         x (Tensor): Tensor of shape (N, 2) representing N 2D points.
-    #         center (Tensor): Tensor of shape (2,) representing the center of rotation (a, b).
-
-    #     Returns:
-    #         Tensor: Tensor of shape (N, 2), each row is the direction of the vector field at the corresponding point in `x`.
-    #     """
-    #     warnings.warn("Using hard-coded kernel. Only use for debugging.")
-    #     v = x - center  # shape (N, 2)
-    #     rotated = torch.stack([-v[:, 1], v[:, 0]], dim=1)  # rotate 90° CCW
-    #     return rotated.unsqueeze(1)
-
     def rotation_vector_field(self, p_batch: torch.tensor, center)->torch.tensor:
         """Returns kernel samples at batched points p from a task."""
 
         _generator=torch.tensor([[0, -1], [1,0]], requires_grad=False, dtype=torch.float32).unsqueeze(0)
         projected_state = p_batch-center
         return torch.einsum("dmn, bn->bdm", _generator, projected_state)
+    
+
+    def _validate_inputs(self):
+        """Validates user inputs."""
+        assert self._lg_inits_how in ['random', 'mode', 'zeros'], "lg_inits_how must be one of ['random', 'mode', 'zeros']."
+        assert len(self.tasks_ps) == len(self.tasks_frameestimators), "Number of tasks and frame estimators must match."
+        # TODO: assert that encoder and decoder are identity map in the beginning
