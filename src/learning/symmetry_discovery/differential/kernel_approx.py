@@ -37,6 +37,7 @@ class KernelFrameEstimator():
         self.epsilon_ball = epsilon_ball
         self.epsilon_level_set = epsilon_level_set
         self.pointwise_frame = {}
+        self._finished_setup_evaluation=False
 
 
     def compute(self) -> dict[int, torch.tensor]:
@@ -63,39 +64,49 @@ class KernelFrameEstimator():
 
     
     def set_frame(self, frame: dict[int, torch.tensor]):
-        """Sets the pointwise frame of the kernel distribution."""
+        """Sets the pointwise frame of the kernel distribution and initializes the kernel evaluation."""
         self.pointwise_frame = frame
+        self.setup_evaluation()
 
-    
-    def evaluate(self, 
-                 p: torch.tensor,
-                 k: int,
-                 bandwidth:float) -> torch.tensor:
-        """Computes a frame of the kernel distribution at a new point p via a Gaussian kernel.
-        Args:
-            p: torch.tensor of shape (|M|,), the point at which to evaluate the kernel frame.
-            k: int, number of nearest neighbors to consider for the kernel approximation.
-            bandwidth: float, bandwidth of the Gaussian kernel.
-        """
 
+    def setup_evaluation(self):
+        """Sets up the sampling from the kernel distribution by building an approximate k-nearest neighbor graph."""
         self.known_idx = torch.tensor(list(self.pointwise_frame.keys()))
         self.known_ps = self.ps[self.known_idx]
         self.known_frames = torch.stack([self.pointwise_frame[int(i)] for i in self.known_idx])
+        self._finished_setup_evaluation=True
+        logging.info("Setup kernel frame evaluation.")
 
-        dist = torch.cdist(p[None], self.known_ps)[0]
-        if k < len(dist):
-            knn_idx = dist.topk(k, largest=False).indices
-        else:
-            knn_idx = torch.arange(len(dist))
+    def evaluate(self, 
+                    ps: torch.Tensor,
+                    bandwidth: float,
+                    threshold: float = 0.1) -> torch.Tensor:
+        """
+        Computes a frame of the kernel distribution via a gaussian kernel at a batch of points..
 
-        weights = torch.exp(-dist[knn_idx]**2 / (2 * bandwidth**2))
-        weights = weights / weights.sum()
+        Args:
+            P: torch.Tensor of shape (b, n), batch of query points.
+            bandwidth: float, bandwidth of the Gaussian kernel.
+            threshold: float, relative cutoff for kernel weights.
+        
+        Returns:
+            torch.Tensor of shape (B, m, kernel_dim)
+        """
+        assert self._finished_setup_evaluation, "Call setup_evaluation() before evaluate()."
+        assert ps.dim()==2, "Input ps must be a 2D tensor of shape (b, n)."
 
-        local_bases = self.known_frames[knn_idx]
-        weighted = torch.einsum('i,ijk->jk', weights, local_bases)
 
-        Q, _ = torch.linalg.qr(weighted)
-        return Q[:, :self.kernel_dim]
+        dist2 = torch.cdist(ps, self.known_ps, p=2)**2
+        weights = torch.exp(-dist2 / (2 * bandwidth**2))
+
+        max_weights, _ = weights.max(dim=1, keepdim=True)
+        mask = weights > threshold * max_weights
+        weights = weights * mask  # (B, N)
+        weights = weights / (weights.sum(dim=1, keepdim=True) + 1e-8)
+
+        weighted = (weights[:, :, None, None] * self.known_frames[None, :, :, :]).sum(dim=1)
+        U, _, _ = torch.linalg.svd(weighted, full_matrices=False)
+        return U[:, :, :self.kernel_dim]
 
 
     def _compute_neighborhood(self, data, epsilon) -> list:

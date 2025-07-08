@@ -72,3 +72,28 @@ def load_replay_buffer(path: str,
             'actions': clean_array(replay_buffer.actions),
             'rewards': clean_array(replay_buffer.rewards),
             'next_observations': clean_array(replay_buffer.next_observations)}
+
+
+def approx_mode(samples: th.Tensor, num_bins: int = 100):
+    """
+    Approximates the marginal mode of a 2D tensor (N_samples, dim)
+    using histogram binning along each dimension.
+    """
+    assert samples.dim()==2, "Input tensor must be 2D (N_samples, dim)"
+    _, D = samples.shape
+    modes = []
+
+    for d in range(D):
+        col = samples[:, d]
+        min_val, max_val = col.min(), col.max()
+        bins = th.linspace(min_val, max_val, steps=num_bins + 1)
+        bin_indices = th.bucketize(col, bins)
+        counts = th.bincount(bin_indices, minlength=num_bins + 2)
+        mode_bin = th.argmax(counts)
+        if 0 < mode_bin < len(bins):
+            mode_val = (bins[mode_bin - 1] + bins[mode_bin]) / 2
+        else:
+            mode_val = bins[min(mode_bin, len(bins) - 1)]
+
+        modes.append(mode_val)
+    return th.stack(modes)
