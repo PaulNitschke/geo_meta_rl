@@ -4,6 +4,7 @@ import numpy as np
 import torch as th
 import gym
 from gym import spaces
+import scipy.linalg
 
 from garage import EnvStep
 from garage import StepType
@@ -97,3 +98,48 @@ def approx_mode(samples: th.Tensor, num_bins: int = 100):
 
         modes.append(mode_val)
     return th.stack(modes)
+
+
+class matrixLogarithm:
+    def __init__(self):
+        """Implements a differentiable matrix logarithm in PyTorch.
+
+        Usage:
+        logm = matrixLogarithm()
+        A = th.randn(3, 3, dtype=th.float32, requires_grad=True)
+        log_A= logm.apply(A)
+        log_A.requires_grad
+
+        Source: https://github.com/pytorch/pytorch/issues/9983
+        """
+        self._logm_func = self._LogmFunction.apply
+
+    def apply(self, A: th.Tensor) -> th.Tensor:
+        return self._logm_func(A)
+
+    @staticmethod
+    def _adjoint(A, E, f):
+        A_H = A.mH.to(E.dtype)
+        n = A.size(0)
+        M = th.zeros(2 * n, 2 * n, dtype=E.dtype, device=E.device)
+        M[:n, :n] = A_H
+        M[n:, n:] = A_H
+        M[:n, n:] = E
+        return f(M)[:n, n:].to(A.dtype)
+
+    @staticmethod
+    def _logm_scipy(A):
+        return th.from_numpy(scipy.linalg.logm(A.cpu(), disp=False)[0]).to(A.device)
+
+    class _LogmFunction(th.autograd.Function):
+        @staticmethod
+        def forward(ctx, A):
+            assert A.ndim == 2 and A.size(0) == A.size(1), "A must be a square matrix"
+            assert A.dtype in (th.float32, th.float64, th.complex64, th.complex128), "Unsupported dtype"
+            ctx.save_for_backward(A)
+            return matrixLogarithm._logm_scipy(A)
+
+        @staticmethod
+        def backward(ctx, G):
+            A, = ctx.saved_tensors
+            return matrixLogarithm._adjoint(A, G, matrixLogarithm._logm_scipy)

@@ -3,7 +3,7 @@ import warnings
 from tqdm import tqdm
 from typing import Literal, List
 
-from ....utils import approx_mode
+from ....utils import approx_mode, matrixLogarithm
 
 
 class HereditaryGeometryDiscovery():
@@ -16,13 +16,15 @@ class HereditaryGeometryDiscovery():
                  decoder: callable=None,
                  seed:int=42,
                  lg_inits_how:Literal['random', 'mode', 'zeros']= 'mode',
+                 batch_size:int=64,
+                 bandwidth:float=0.5,
+
+                 use_oracle_rotation_kernel:bool=False,
                  learn_left_actions:bool=True,
                  learn_encoder_decoder:bool=False,
                  oracle_generator: torch.tensor=None,
                  task_specifications:list=None,
-                 batch_size:int=64,
-                 bandwidth:float=0.5):
-        
+                ):
         """Hereditary Geometry Discovery.
         This class implements hereditary symmetry discovery.
 
@@ -61,6 +63,7 @@ class HereditaryGeometryDiscovery():
         self.bandwidth=bandwidth
 
 
+        self._use_oracle_rotation_kernel=use_oracle_rotation_kernel
         self.task_specifications=task_specifications
         self.oracle_generator= oracle_generator
         self._learn_left_actions=learn_left_actions
@@ -74,8 +77,10 @@ class HereditaryGeometryDiscovery():
         self._n_samples=tasks_ps[0][:,0].shape[0]
         self.task_idxs = list(range(self._n_tasks))
         self.task_idxs.remove(self.base_task_index)
+        self.frame_base_task= self.tasks_frameestimators[self.base_task_index]
+        self.frame_i_tasks= [self.tasks_frameestimators[i] for i in self.task_idxs]
 
-
+        self._matrix_log=matrixLogarithm()
         self._losses=[]
         self._task_losses=[]
         
@@ -89,49 +94,53 @@ class HereditaryGeometryDiscovery():
             lg_inits=[torch.linalg.lstsq(approx_modes[0].unsqueeze(0), approx_modes[i].unsqueeze(0)).solution.T for i in self.task_idxs]
             lg_inits=torch.stack(lg_inits)
             self.lgs = torch.nn.Parameter(lg_inits)
-            assert self.lgs.shape == (self._n_tasks-1, self.ambient_dim, self.ambient_dim), "Left actions must be of shape (N_tasks-1, d, n)."
+            assert self.lgs.shape == (self._n_tasks-1, self.ambient_dim, self.ambient_dim), "Left actions must be of shape (N_tasks-1, n, n)."
         elif self._lg_inits_how == 'random':
             self.lgs = torch.nn.Parameter(torch.randn(size=(self._n_tasks-1, self.ambient_dim, self.ambient_dim)))
-        self.optimizer_lgs=torch.optim.Adam([self.lgs], lr=0.00035)
+        self._lg_inits=self.lgs.clone()
 
+        self.generator=torch.nn.Parameter(torch.randn(size=(self.kernel_dim, self.ambient_dim, self.ambient_dim))) if self.oracle_generator is None else torch.nn.Parameter(self.oracle_generator.clone())
+
+
+        self.optimizer_lgs=torch.optim.Adam([self.lgs], lr=0.00035)
+        self.optimizer_generator=torch.optim.Adam([self.generator], lr=0.00035)
         self.optimizer_encoder=torch.optim.Adam(self.encoder.parameters(), lr=0.00035) if self.encoder is not None else None
         self.optimizer_decoder=torch.optim.Adam(self.decoder.parameters(), lr=0.00035) if self.decoder is not None else None
 
     
-    def evalute_left_actions(self, lgs: torch.Tensor, track_loss:bool=True):
+    def evalute_left_actions(self, lgs: torch.Tensor, track_loss:bool=True) -> float:
         """Computes kernel alignment loss of all left-actions."""
 
         # 1. Sample points and push-forward
-        ps = self.tasks_ps[self.base_task_index][torch.randint(0, self._n_samples, (self.batch_size,))]
-        lg_ps = torch.einsum("Nmn,bn->Nbm", lgs, ps)  # shape (n_tasks-1, b, n)
+        _b_idxs= torch.randint(0, self._n_samples, (self.batch_size,))
+        ps = self.tasks_ps[self.base_task_index][_b_idxs]
+        lg_ps = torch.einsum("Nmn,bn->Nbm", lgs, ps)
 
 
         # 2. Sample tangent vectors and push-forward tangent vectors
-        # TODO: this uses ground-truth frame for debugging.
-        goal_base = self.task_specifications[self.base_task_index]['goal']
-        frame_ps= self.rotation_vector_field(ps, center=goal_base)
-        lgs_frame_ps=torch.einsum("Nmn,bdn->Nbdm", lgs, frame_ps)  #(n_tasks, kernel_dim, ambient_dim)      
-        # lgs_frame_ps= torch.stack([torch.einsum("mn, bn->bm", lgs[i], frame_ps) for i in self.task_idxs], dim=0)  # shape (n_tasks-1, b, d, n)
-        goals = torch.stack([torch.tensor(self.task_specifications[i]['goal']) for i in self.task_idxs])
-        # frames_i_lg_ps = torch.vmap(self.rotation_vector_field,in_dims=(0, 0))(lg_ps, goals)
-        frames_i_lg_ps = torch.stack([
-            self.rotation_vector_field(lg_ps[i], goals[i])
-            for i in range(lg_ps.shape[0])
-            # for i in len(lg_ps)
-        ], dim=0)
-    #     # frame_base_task= self.tasks_frameestimators[idx_task_base]
-    #     # frame_i_task= self.tasks_frameestimators[idx_task_i]
-    #     # frame_base=frame_base_task.evaluate(ps_base_batch, bandwidth=self.bandwidth)
-    #     # frame_i_push= frame_i_task.evaluate(ps_base_push, bandwidth=self.bandwidth)
+        if not self._use_oracle_rotation_kernel:
+            frame_ps=self.frame_base_task.evaluate(ps, bandwidth=self.bandwidth).transpose(-1, -2)
+            frames_i_lg_ps = torch.stack([
+                self.frame_i_tasks[i].evaluate(lg_ps[i], bandwidth=self.bandwidth)
+                for i in range(self._n_tasks-1)], dim=0).transpose(-1, -2)
+            
+        else:
+            # Use oracle rotation kernel
+            frame_ps = self.rotation_vector_field(ps, center=self.task_specifications[self.base_task_index]['goal'])
+            goals = torch.stack([torch.tensor(self.task_specifications[i]['goal']) for i in self.task_idxs])
+            frames_i_lg_ps = torch.stack([
+                self.rotation_vector_field(lg_ps[i], center=goals[i])
+                for i in range(lg_ps.shape[0])], dim=0)
+        lgs_frame_ps = torch.einsum("Nmn,bdn->Nbdm", lgs, frame_ps)
 
 
         # 3. Compute projection loss.
         def compute_ortho_loss(vec):
             """Computes orthogonal complement loss by averaging norm of orthogonal complement across kernel dimensions and batch size."""
             assert vec.dim()==4, "Vector field must be of shape (N, b, d, n)."
-            vec=torch.norm(vec, dim=(-1)) #norm of orthogonal complement along each vector field.
-            vec=vec.sum(-1) #Sum across kernel dimensions.
-            return vec.mean(-1) #mean across batch
+            vec=torch.norm(vec, dim=(-1))
+            vec=vec.sum(-1)
+            return vec.mean(-1)
 
         ortho_frame_i_lg_ps = self._ortho_comp(frames_i_lg_ps, lgs_frame_ps)
         ortho_lgs_frame_ps = self._ortho_comp(lgs_frame_ps, frames_i_lg_ps)
@@ -140,6 +149,13 @@ class HereditaryGeometryDiscovery():
         if track_loss:
             self._losses.append(self.task_losses.detach().cpu().numpy())
         return self.task_losses.mean()
+    
+
+    def evaluate_generator_span(self, track_loss:bool=True)->float:
+        """Evalutes whether all left-actions are inside the span of the generator."""
+        log_lgs=torch.stack([self._matrix_log.apply(self.lgs[idx_task]) for idx_task in range(self._n_tasks-1)], dim=0)
+
+        ortho_log_lgs_generator=self._ortho_comp(log_lgs, self.generator)
     
 
     def evalute_symmetry(self)->float:
@@ -177,7 +193,6 @@ class HereditaryGeometryDiscovery():
         return self.loss_symmetry+self.loss_reconstruction
         
 
-
     def _project_onto_subspace(self, vecs, basis):
         """
         Projects a set of vectors onto a subspace spanned by the basis.
@@ -186,17 +201,12 @@ class HereditaryGeometryDiscovery():
         Returns:
         - proj_vecs: tensor of shape (N, b, d, n)
         """
-        basis_t = basis.transpose(-2, -1)  # (N, b, n, d)
-
-        # Gram matrix: (N, b, d, d)
+        basis_t = basis.transpose(-2, -1)
         G = torch.matmul(basis, basis_t)
-        G_inv = torch.linalg.pinv(G)  # (N, b, d, d)
-
-        # Projection matrix: (N, b, n, n)
-        P = torch.matmul(basis_t, torch.matmul(G_inv, basis))  # (N, b, n, n)
-
-        # Project vecs: (N, b, d, n)
+        G_inv = torch.linalg.pinv(G)
+        P = torch.matmul(basis_t, torch.matmul(G_inv, basis))
         return torch.matmul(vecs, P)
+
 
     def _ortho_comp(self, vecs, basis):
         """
@@ -247,7 +257,7 @@ class HereditaryGeometryDiscovery():
         for n_steps in progress_bar:
             loss = self.take_grad_step()
             
-            if n_steps% 1000 == 0 and n_steps>0:
+            if n_steps% 50 == 0 and n_steps>0:
                 if self._learn_left_actions:
                     progress_bar.set_description(
                         f"Loss: {loss.item():.2e}, Task Losses: {self.task_losses.detach().cpu().numpy().round(3)}"
