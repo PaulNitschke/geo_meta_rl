@@ -75,6 +75,49 @@ def load_replay_buffer(path: str,
             'next_observations': clean_array(replay_buffer.next_observations)}
 
 
+
+class ExponentialLinearRegressor(th.nn.Module):
+    """
+    Learns a matrix W such that exp(W) * X ≈ Y
+    """
+    def __init__(self, input_dim: int, seed:int):
+        super().__init__()
+        th.manual_seed(seed)
+        self.W = th.nn.Parameter(th.randn(input_dim, input_dim))
+
+    def forward(self, X: th.Tensor) -> th.Tensor:
+        """
+        X: (N, n) input matrix
+        Returns: (N, n) prediction
+        """
+        W_exp = th.matrix_exp(self.W)
+        return (W_exp @ X.T).T  # Apply from left, return (N, n)
+
+    def loss(self, X: th.Tensor, Y: th.Tensor) -> th.Tensor:
+        """
+        Computes MSE loss between predicted and true outputs.
+        """
+        Y_pred = self.forward(X)
+        return th.mean((Y - Y_pred) ** 2)
+
+    def fit(self, X: th.Tensor, Y: th.Tensor, lr: float = 1e-2,
+            epochs: int = 1000, verbose: bool = False):
+        """
+        Fits the model parameters to minimize MSE between exp(W) * X and Y.
+        """
+        optimizer = th.optim.Adam([self.W], lr=lr)
+        for epoch in range(epochs):
+            optimizer.zero_grad()
+            loss = self.loss(X, Y)
+            loss.backward()
+            optimizer.step()
+            if verbose and epoch % 100 == 0:
+                print(f"Epoch {epoch}: Loss = {loss.item():.6f}")
+        return self.W.data.clone()  # or torch.matrix_exp(self.W).data.clone()
+
+    
+
+
 def approx_mode(samples: th.Tensor, num_bins: int = 100):
     """
     Approximates the marginal mode of a 2D tensor (N_samples, dim)
@@ -100,46 +143,48 @@ def approx_mode(samples: th.Tensor, num_bins: int = 100):
     return th.stack(modes)
 
 
-class matrixLogarithm:
-    def __init__(self):
-        """Implements a differentiable matrix logarithm in PyTorch.
 
-        Usage:
-        logm = matrixLogarithm()
-        A = th.randn(3, 3, dtype=th.float32, requires_grad=True)
-        log_A= logm.apply(A)
-        log_A.requires_grad
 
-        Source: https://github.com/pytorch/pytorch/issues/9983
-        """
-        self._logm_func = self._LogmFunction.apply
+# class matrixLogarithm:
+    # def __init__(self):
+    #     """Implements a differentiable matrix logarithm in PyTorch.
 
-    def apply(self, A: th.Tensor) -> th.Tensor:
-        return self._logm_func(A)
+    #     Usage:
+    #     logm = matrixLogarithm()
+    #     A = th.randn(3, 3, dtype=th.float32, requires_grad=True)
+    #     log_A= logm.apply(A)
+    #     log_A.requires_grad
 
-    @staticmethod
-    def _adjoint(A, E, f):
-        A_H = A.mH.to(E.dtype)
-        n = A.size(0)
-        M = th.zeros(2 * n, 2 * n, dtype=E.dtype, device=E.device)
-        M[:n, :n] = A_H
-        M[n:, n:] = A_H
-        M[:n, n:] = E
-        return f(M)[:n, n:].to(A.dtype)
+    #     Source: https://github.com/pytorch/pytorch/issues/9983
+    #     """
+    #     self._logm_func = self._LogmFunction.apply
 
-    @staticmethod
-    def _logm_scipy(A):
-        return th.from_numpy(scipy.linalg.logm(A.cpu(), disp=False)[0]).to(A.device)
+    # def apply(self, A: th.Tensor) -> th.Tensor:
+    #     return self._logm_func(A)
 
-    class _LogmFunction(th.autograd.Function):
-        @staticmethod
-        def forward(ctx, A):
-            assert A.ndim == 2 and A.size(0) == A.size(1), "A must be a square matrix"
-            assert A.dtype in (th.float32, th.float64, th.complex64, th.complex128), "Unsupported dtype"
-            ctx.save_for_backward(A)
-            return matrixLogarithm._logm_scipy(A)
+    # @staticmethod
+    # def _adjoint(A, E, f):
+    #     A_H = A.mH.to(E.dtype)
+    #     n = A.size(0)
+    #     M = th.zeros(2 * n, 2 * n, dtype=E.dtype, device=E.device)
+    #     M[:n, :n] = A_H
+    #     M[n:, n:] = A_H
+    #     M[:n, n:] = E
+    #     return f(M)[:n, n:].to(A.dtype)
 
-        @staticmethod
-        def backward(ctx, G):
-            A, = ctx.saved_tensors
-            return matrixLogarithm._adjoint(A, G, matrixLogarithm._logm_scipy)
+    # @staticmethod
+    # def _logm_scipy(A):
+    #     return th.from_numpy(scipy.linalg.logm(A.cpu(), disp=False)[0]).to(A.device)
+
+    # class _LogmFunction(th.autograd.Function):
+    #     @staticmethod
+    #     def forward(ctx, A):
+    #         assert A.ndim == 2 and A.size(0) == A.size(1), "A must be a square matrix"
+    #         assert A.dtype in (th.float32, th.float64, th.complex64, th.complex128), "Unsupported dtype"
+    #         ctx.save_for_backward(A)
+    #         return matrixLogarithm._logm_scipy(A)
+
+    #     @staticmethod
+    #     def backward(ctx, G):
+    #         A, = ctx.saved_tensors
+    #         return matrixLogarithm._adjoint(A, G, matrixLogarithm._logm_scipy)

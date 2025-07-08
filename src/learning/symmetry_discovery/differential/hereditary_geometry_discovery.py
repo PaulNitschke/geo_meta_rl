@@ -2,8 +2,9 @@ import torch
 import warnings
 from tqdm import tqdm
 from typing import Literal, List
+import logging
 
-from ....utils import approx_mode, matrixLogarithm
+from ....utils import ExponentialLinearRegressor
 
 
 class HereditaryGeometryDiscovery():
@@ -15,15 +16,15 @@ class HereditaryGeometryDiscovery():
                  encoder: callable=None,
                  decoder: callable=None,
                  seed:int=42,
-                 lg_inits_how:Literal['random', 'mode', 'zeros']= 'mode',
+                 log_lg_inits_how:Literal['log_linreg', 'random']= 'log_linreg',
                  batch_size:int=64,
                  bandwidth:float=0.5,
 
+                 task_specifications:list=None,
                  use_oracle_rotation_kernel:bool=False,
+                 oracle_generator: torch.tensor=None,
                  learn_left_actions:bool=True,
                  learn_encoder_decoder:bool=False,
-                 oracle_generator: torch.tensor=None,
-                 task_specifications:list=None,
                 ):
         """Hereditary Geometry Discovery.
         This class implements hereditary symmetry discovery.
@@ -51,16 +52,16 @@ class HereditaryGeometryDiscovery():
         - N: number of tasks.
         """
 
-        
         self.tasks_ps= tasks_ps
         self.tasks_frameestimators=tasks_frameestimators
         self.kernel_dim=kernel_dim
         self.base_task_index=0
-        self._lg_inits_how=lg_inits_how
+        self._log_lg_inits_how=log_lg_inits_how
         self.encoder=encoder
         self.decoder=decoder
         self.batch_size=batch_size
         self.bandwidth=bandwidth
+        self.seed=seed
 
 
         self._use_oracle_rotation_kernel=use_oracle_rotation_kernel
@@ -80,38 +81,47 @@ class HereditaryGeometryDiscovery():
         self.frame_base_task= self.tasks_frameestimators[self.base_task_index]
         self.frame_i_tasks= [self.tasks_frameestimators[i] for i in self.task_idxs]
 
-        self._matrix_log=matrixLogarithm()
         self._losses=[]
         self._task_losses=[]
         
 
         # Optimization variables
         torch.manual_seed(seed)
-        # self.lgs=[torch.nn.Parameter(torch.randn(self.ambient_dim, self.ambient_dim)) for _ in range(self._n_tasks-1)]  # one left-action per task minus the base task.
-        # self.optimizer_lgs=[torch.optim.Adam([lg], lr=0.00035) for lg in self.lgs]  # one optimizer per left-action.
-        if self._lg_inits_how == 'mode':
-            approx_modes=[approx_mode(ps) for ps in tasks_ps]
-            lg_inits=[torch.linalg.lstsq(approx_modes[0].unsqueeze(0), approx_modes[i].unsqueeze(0)).solution.T for i in self.task_idxs]
-            lg_inits=torch.stack(lg_inits)
-            self.lgs = torch.nn.Parameter(lg_inits)
-            assert self.lgs.shape == (self._n_tasks-1, self.ambient_dim, self.ambient_dim), "Left actions must be of shape (N_tasks-1, n, n)."
-        elif self._lg_inits_how == 'random':
-            self.lgs = torch.nn.Parameter(torch.randn(size=(self._n_tasks-1, self.ambient_dim, self.ambient_dim)))
-        self._lg_inits=self.lgs.clone()
+
+        if self._log_lg_inits_how == 'log_linreg':
+            self._log_lg_inits=self._init_log_lgs_linear_reg(verbose=False, epochs=2500)
+
+        elif self._log_lg_inits_how == 'random':
+            self._log_lg_inits = torch.randn(size=(self._n_tasks-1, self.ambient_dim, self.ambient_dim))
+
+        self.log_lgs= torch.nn.Parameter(self._log_lg_inits.clone())
+        assert self.log_lgs.shape == (self._n_tasks-1, self.ambient_dim, self.ambient_dim), "Log left actions must be of shape (N_tasks-1, n, n)."
 
         self.generator=torch.nn.Parameter(torch.randn(size=(self.kernel_dim, self.ambient_dim, self.ambient_dim))) if self.oracle_generator is None else torch.nn.Parameter(self.oracle_generator.clone())
 
 
-        self.optimizer_lgs=torch.optim.Adam([self.lgs], lr=0.00035)
+        self.optimizer_lgs = torch.optim.Adam([self.log_lgs],lr=0.00035)        
         self.optimizer_generator=torch.optim.Adam([self.generator], lr=0.00035)
         self.optimizer_encoder=torch.optim.Adam(self.encoder.parameters(), lr=0.00035) if self.encoder is not None else None
         self.optimizer_decoder=torch.optim.Adam(self.decoder.parameters(), lr=0.00035) if self.decoder is not None else None
 
-    
-    def evalute_left_actions(self, lgs: torch.Tensor, track_loss:bool=True) -> float:
-        """Computes kernel alignment loss of all left-actions."""
 
+    def _init_log_lgs_linear_reg(self, verbose=False, epochs=1000):
+        """Fits log-linear regressors to initialize left actions."""
+        logging.info("Fitting log-linear regressors to initialize left actions.")
+        self._log_lg_inits = [
+            ExponentialLinearRegressor(input_dim=self.ambient_dim, seed=self.seed).fit(
+                X=self.tasks_ps[0], Y=self.tasks_ps[idx_task], verbose=verbose, epochs=epochs
+            )
+            for idx_task in self.task_idxs]
+        logging.info("Finished fitting log-linear regressors to initialize left actions.")       
+        return torch.stack(self._log_lg_inits, dim=0)
+
+    
+    def evalute_left_actions(self, log_lgs: torch.Tensor, track_loss:bool=True) -> float:
+        """Computes kernel alignment loss of all left-actions."""
         # 1. Sample points and push-forward
+        lgs=torch.linalg.matrix_exp(log_lgs)
         _b_idxs= torch.randint(0, self._n_samples, (self.batch_size,))
         ps = self.tasks_ps[self.base_task_index][_b_idxs]
         lg_ps = torch.einsum("Nmn,bn->Nbm", lgs, ps)
@@ -153,9 +163,7 @@ class HereditaryGeometryDiscovery():
 
     def evaluate_generator_span(self, track_loss:bool=True)->float:
         """Evalutes whether all left-actions are inside the span of the generator."""
-        log_lgs=torch.stack([self._matrix_log.apply(self.lgs[idx_task]) for idx_task in range(self._n_tasks-1)], dim=0)
-
-        ortho_log_lgs_generator=self._ortho_comp(log_lgs, self.generator)
+        # ortho_log_lgs_generator=self._ortho_comp(log_lgs, self.generator)
     
 
     def evalute_symmetry(self)->float:
@@ -225,7 +233,7 @@ class HereditaryGeometryDiscovery():
 
         if self._learn_left_actions:
             self.optimizer_lgs.zero_grad()
-            loss = self.evalute_left_actions(lgs=self.lgs)
+            loss = self.evalute_left_actions(log_lgs=self.log_lgs)
             loss.backward()
             self.optimizer_lgs.step()
 
@@ -278,6 +286,15 @@ class HereditaryGeometryDiscovery():
 
     def _validate_inputs(self):
         """Validates user inputs."""
-        assert self._lg_inits_how in ['random', 'mode', 'zeros'], "lg_inits_how must be one of ['random', 'mode', 'zeros']."
+        assert self._log_lg_inits_how in ['random', 'log_linreg'], "_log_lg_inits_how must be one of ['random', 'log_linreg']."
         assert len(self.tasks_ps) == len(self.tasks_frameestimators), "Number of tasks and frame estimators must match."
         # TODO: assert that encoder and decoder are identity map in the beginning
+
+
+    @property
+    def lgs(self):
+        return torch.linalg.matrix_exp(self.log_lgs)
+    
+    @property
+    def lgs_inits(self):
+        return torch.linalg.matrix_exp(self._log_lg_inits)
