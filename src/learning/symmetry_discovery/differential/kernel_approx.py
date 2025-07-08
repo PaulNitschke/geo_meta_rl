@@ -8,7 +8,6 @@ import numpy as np
 import pickle
 from scipy.spatial import KDTree
 import torch
-import faiss
 
 from constants import DTYPE
 
