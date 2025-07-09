@@ -1,8 +1,9 @@
 import torch
 import warnings
 from tqdm import tqdm
-from typing import Literal, List
+from typing import Literal, List, Tuple
 import logging
+import numpy as np
 
 from ....utils import ExponentialLinearRegressor
 
@@ -24,6 +25,7 @@ class HereditaryGeometryDiscovery():
                  use_oracle_rotation_kernel:bool=False,
                  oracle_generator: torch.tensor=None,
                  learn_left_actions:bool=True,
+                 learn_generator:bool=True,
                  learn_encoder_decoder:bool=False,
                 ):
         """Hereditary Geometry Discovery.
@@ -68,6 +70,7 @@ class HereditaryGeometryDiscovery():
         self.task_specifications=task_specifications
         self.oracle_generator= oracle_generator
         self._learn_left_actions=learn_left_actions
+        self._learn_generator=learn_generator
         self._learn_encoder_decoder=learn_encoder_decoder
 
         self._validate_inputs()
@@ -81,8 +84,13 @@ class HereditaryGeometryDiscovery():
         self.frame_base_task= self.tasks_frameestimators[self.base_task_index]
         self.frame_i_tasks= [self.tasks_frameestimators[i] for i in self.task_idxs]
 
-        self._losses=[]
-        self._task_losses=[]
+        self._losses={}
+        self._losses["task_losses"]= []
+        self._losses["left_action_losses"]= []
+        self._losses["symmetry_losses"]= []
+        self._losses["reconstruction_losses"]= []
+        self._losses["generator_span_left_action_losses"]= []
+        self._losses["left_action_span_generator_losses"]=[]
         
 
         # Optimization variables
@@ -95,35 +103,23 @@ class HereditaryGeometryDiscovery():
             self._log_lg_inits = torch.randn(size=(self._n_tasks-1, self.ambient_dim, self.ambient_dim))
 
         self.log_lgs= torch.nn.Parameter(self._log_lg_inits.clone())
-        assert self.log_lgs.shape == (self._n_tasks-1, self.ambient_dim, self.ambient_dim), "Log left actions must be of shape (N_tasks-1, n, n)."
-
         self.generator=torch.nn.Parameter(torch.randn(size=(self.kernel_dim, self.ambient_dim, self.ambient_dim))) if self.oracle_generator is None else torch.nn.Parameter(self.oracle_generator.clone())
+        
+        assert self.log_lgs.shape == (self._n_tasks-1, self.ambient_dim, self.ambient_dim), "Log left actions must be of shape (N_tasks-1, n, n)."
+        assert self.generator.shape == (self.kernel_dim, self.ambient_dim, self.ambient_dim), "Generator must be of shape (d, n, n)."
 
-
-        self.optimizer_lgs = torch.optim.Adam([self.log_lgs],lr=0.00035)        
+        self.optimizer_lgs = torch.optim.Adam([self.log_lgs],lr=0.00035)
         self.optimizer_generator=torch.optim.Adam([self.generator], lr=0.00035)
         self.optimizer_encoder=torch.optim.Adam(self.encoder.parameters(), lr=0.00035) if self.encoder is not None else None
         self.optimizer_decoder=torch.optim.Adam(self.decoder.parameters(), lr=0.00035) if self.decoder is not None else None
-
-
-    def _init_log_lgs_linear_reg(self, verbose=False, epochs=1000):
-        """Fits log-linear regressors to initialize left actions."""
-        logging.info("Fitting log-linear regressors to initialize left actions.")
-        self._log_lg_inits = [
-            ExponentialLinearRegressor(input_dim=self.ambient_dim, seed=self.seed).fit(
-                X=self.tasks_ps[0], Y=self.tasks_ps[idx_task], verbose=verbose, epochs=epochs
-            )
-            for idx_task in self.task_idxs]
-        logging.info("Finished fitting log-linear regressors to initialize left actions.")       
-        return torch.stack(self._log_lg_inits, dim=0)
 
     
     def evalute_left_actions(self, log_lgs: torch.Tensor, track_loss:bool=True) -> float:
         """Computes kernel alignment loss of all left-actions."""
         # 1. Sample points and push-forward
-        lgs=torch.linalg.matrix_exp(log_lgs)
         _b_idxs= torch.randint(0, self._n_samples, (self.batch_size,))
         ps = self.tasks_ps[self.base_task_index][_b_idxs]
+        lgs=torch.linalg.matrix_exp(log_lgs)
         lg_ps = torch.einsum("Nmn,bn->Nbm", lgs, ps)
 
 
@@ -152,20 +148,30 @@ class HereditaryGeometryDiscovery():
             vec=vec.sum(-1)
             return vec.mean(-1)
 
-        ortho_frame_i_lg_ps = self._ortho_comp(frames_i_lg_ps, lgs_frame_ps)
-        ortho_lgs_frame_ps = self._ortho_comp(lgs_frame_ps, frames_i_lg_ps)
+        _, ortho_frame_i_lg_ps = self._project_onto_vector_subspace(frames_i_lg_ps, lgs_frame_ps)
+        _, ortho_lgs_frame_ps = self._project_onto_vector_subspace(lgs_frame_ps, frames_i_lg_ps)
         self.task_losses = compute_ortho_loss(ortho_frame_i_lg_ps) + compute_ortho_loss(ortho_lgs_frame_ps) 
 
         if track_loss:
-            self._losses.append(self.task_losses.detach().cpu().numpy())
+            self._losses["left_action_losses"].append(self.task_losses.mean().detach().cpu().numpy())
+            self._losses["task_losses"].append(self.task_losses.detach().cpu().numpy())
+
         return self.task_losses.mean()
     
 
-    def evaluate_generator_span(self, track_loss:bool=True)->float:
+    def evaluate_generator_span(self, generator, log_lgs, track_loss:bool=True)->float:
         """Evalutes whether all left-actions are inside the span of the generator."""
-        # ortho_log_lgs_generator=self._ortho_comp(log_lgs, self.generator)
-    
+        _, ortho_log_lgs_generator=self._project_onto_tensor_subspace(log_lgs, generator) #Are the left-actions inside the generator?
+        # ortho_generator_log_lgs=self.project_onto_tensor_subspace(generator, log_lgs) #Is the generator inside the span of the left-actions? We don't need this to be true, only to check whether generator_log_lgs is too large as sanity check.
+        loss_span=torch.mean(torch.norm(ortho_log_lgs_generator, p="fro",dim=(1,2)),dim=0)
+        # loss_max = torch.norm(ortho_generator_log_lgs, dim=-1).sum(-1).mean()
 
+        if track_loss:
+            self._losses["generator_span_left_action_losses"].append(loss_span.detach().cpu().numpy())
+            # self._losses["left_action_span_generator_losses"].append(loss_max.detach().cpu().numpy())
+        return loss_span
+
+    
     def evalute_symmetry(self)->float:
         """Evaluates whether the generator is contained within the kernel distribution of the base task (expressed in the encoder and decoder)."""
         assert self.oracle_generator is not None, "Oracle generator must be provided to evaluate symmetry."
@@ -201,9 +207,9 @@ class HereditaryGeometryDiscovery():
         return self.loss_symmetry+self.loss_reconstruction
         
 
-    def _project_onto_subspace(self, vecs, basis):
+    def _project_onto_vector_subspace(self, vecs, basis):
         """
-        Projects a set of vectors onto a subspace spanned by the basis.
+        Projects 1-tensors onto a d-dimensional subspace of 1-tensors.#TODO update docstring to extra batch dimension.
         vecs: tensor of shape (N, b, d, n)
         basis: tensor of shape (N, b, d, n)
         Returns:
@@ -213,19 +219,39 @@ class HereditaryGeometryDiscovery():
         G = torch.matmul(basis, basis_t)
         G_inv = torch.linalg.pinv(G)
         P = torch.matmul(basis_t, torch.matmul(G_inv, basis))
-        return torch.matmul(vecs, P)
+        proj_vecs = torch.matmul(vecs, P)
+        return proj_vecs, vecs-proj_vecs
 
 
-    def _ortho_comp(self, vecs, basis):
+    def _project_onto_tensor_subspace(self, tensors: torch.tensor, basis: torch.tensor) -> Tuple[torch.tensor, torch.tensor]:
         """
-        Computes the orthogonal complement of vecs with respect to basis.
-        vecs: tensor of shape (N, b, d, n)
-        basis: tensor of shape (N, b, d, n)
-        Returns:
-        - ortho_vecs: tensor of shape (N, b, d, n)
+        Projects 2-tensors onto a d-dimensional subspace of 2-tensors.
+        Args:
+        - tensors: torch.tensor of shape (b,n,n), b two-tensors
+        - basis: torch.tensor of shape (d,n,n), a d-dimensional vector space of two-tensors, given by its basis.
+
+        Returns: 
+        - proj: torch.tensor of shape (b,n,n), the projection of tensors onto the subspace spanned by basis
+        - ortho_comp: torch.tensor of shape (b,n,n), the orthogonal complement of tensors with respect to the subspace spanned by basis.
         """
-        proj_vecs = self._project_onto_subspace(vecs, basis)
-        return vecs - proj_vecs
+        tensors= tensors.unsqueeze(1)
+        basis=basis.unsqueeze(0)
+        b, d, _, _ = basis.shape
+
+        G = torch.einsum('bdij,bdij->bd', basis, basis)
+        G = G.unsqueeze(-1).expand(-1, -1, d)
+        G = G * torch.eye(d, device=basis.device).unsqueeze(0) + torch.einsum('bdi,bdi->bdi', basis.view(b, d, -1), basis.view(b, d, -1)).transpose(1,2)
+
+        G = torch.matmul(basis.view(b, d, -1), basis.view(b, d, -1).transpose(1, 2))
+        G_inv = torch.linalg.pinv(G)
+
+        v = tensors.expand(-1, d, -1, -1)
+        b_proj = torch.einsum('bdij,bdij->bd', v, basis)
+
+        alpha = torch.matmul(G_inv, b_proj.unsqueeze(-1)).squeeze(-1)
+        proj = torch.sum(alpha.unsqueeze(-1).unsqueeze(-1) * basis, dim=1, keepdim=True)
+        ortho_comp=tensors-proj
+        return proj.squeeze(1), ortho_comp.squeeze(1)
 
         
     def take_grad_step(self):
@@ -233,9 +259,15 @@ class HereditaryGeometryDiscovery():
 
         if self._learn_left_actions:
             self.optimizer_lgs.zero_grad()
-            loss = self.evalute_left_actions(log_lgs=self.log_lgs)
-            loss.backward()
+            loss_left_action = self.evalute_left_actions(log_lgs=self.log_lgs)
+            loss_left_action.backward()
             self.optimizer_lgs.step()
+
+        if self._learn_generator:
+            self.optimizer_generator.zero_grad()
+            loss_span = self.evaluate_generator_span(self.generator, self.log_lgs)
+            loss_span.backward()
+            self.optimizer_generator.step()
 
         if self._learn_encoder_decoder:
             self.optimizer_encoder.zero_grad()
@@ -255,7 +287,6 @@ class HereditaryGeometryDiscovery():
 
         # for optimizer in self.optimizer_lgs:
         #     optimizer.step()
-        return loss
     
 
     def optimize(self, n_steps:int=1000):
@@ -263,17 +294,24 @@ class HereditaryGeometryDiscovery():
         progress_bar = tqdm(range(n_steps), desc="Inferring left-action")
 
         for n_steps in progress_bar:
-            loss = self.take_grad_step()
+            self.take_grad_step()
             
-            if n_steps% 50 == 0 and n_steps>0:
+            if n_steps % 50 == 0 and n_steps > 0:
+                prog_bar_description = ""
+
                 if self._learn_left_actions:
-                    progress_bar.set_description(
-                        f"Loss: {loss.item():.2e}, Task Losses: {self.task_losses.detach().cpu().numpy().round(3)}"
+                    prog_bar_description += (
+                        f"Left-Action Loss: {round(self._losses['left_action_losses'][-1].item(), 3)} | "
+                        f"Task Losses: {np.round(self._losses['task_losses'][-1], 3)} | "
                     )
-                if self._learn_encoder_decoder:
-                    progress_bar.set_description(
-                        f"Symmetry Loss: {self.loss_symmetry.item():.2e}, Reconstruction Loss: {self.loss_reconstruction.item():.2e}"
+
+                if self._learn_generator:
+                    prog_bar_description += (
+                        f"Generator Span Loss: {round(self._losses['generator_span_left_action_losses'][-1].item(), 3)} | "
+                        # f"Inverse Generator Span Loss: {round(self._losses['left_action_span_generator_losses'][-1].item(), 3)}"
                     )
+
+                progress_bar.set_description(prog_bar_description.strip(" | "))
 
 
     def rotation_vector_field(self, p_batch: torch.tensor, center)->torch.tensor:
@@ -291,6 +329,18 @@ class HereditaryGeometryDiscovery():
         # TODO: assert that encoder and decoder are identity map in the beginning
 
 
+    def _init_log_lgs_linear_reg(self, verbose=False, epochs=1000):
+        """Fits log-linear regressors to initialize left actions."""
+        logging.info("Fitting log-linear regressors to initialize left actions.")
+        self._log_lg_inits = [
+            ExponentialLinearRegressor(input_dim=self.ambient_dim, seed=self.seed).fit(
+                X=self.tasks_ps[0], Y=self.tasks_ps[idx_task], verbose=verbose, epochs=epochs
+            )
+            for idx_task in self.task_idxs]
+        logging.info("Finished fitting log-linear regressors to initialize left actions.")       
+        return torch.stack(self._log_lg_inits, dim=0)
+
+
     @property
     def lgs(self):
         return torch.linalg.matrix_exp(self.log_lgs)
@@ -298,3 +348,15 @@ class HereditaryGeometryDiscovery():
     @property
     def lgs_inits(self):
         return torch.linalg.matrix_exp(self._log_lg_inits)
+    
+    @property
+    def losses(self):
+        """Returns all losses."""
+        return {
+            "left_action_losses": np.array(self._losses["left_action_losses"]),
+            "task_losses": np.array(self._losses["task_losses"]),
+            "symmetry_losses": np.array(self._losses["symmetry_losses"]),
+            "reconstruction_losses": np.array(self._losses["reconstruction_losses"]),
+            "generator_span_left_action_losses": np.array(self._losses["generator_span_left_action_losses"]),
+            "left_action_span_generator_losses": np.array(self._losses["left_action_span_generator_losses"]),
+        }
