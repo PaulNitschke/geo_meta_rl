@@ -74,26 +74,42 @@ def load_replay_buffer(path: str,
             'next_observations': clean_array(replay_buffer.next_observations)}
 
 
-def approx_mode(samples: th.Tensor, num_bins: int = 100):
-    """
-    Approximates the marginal mode of a 2D tensor (N_samples, dim)
-    using histogram binning along each dimension.
-    """
-    assert samples.dim()==2, "Input tensor must be 2D (N_samples, dim)"
-    _, D = samples.shape
-    modes = []
 
-    for d in range(D):
-        col = samples[:, d]
-        min_val, max_val = col.min(), col.max()
-        bins = th.linspace(min_val, max_val, steps=num_bins + 1)
-        bin_indices = th.bucketize(col, bins)
-        counts = th.bincount(bin_indices, minlength=num_bins + 2)
-        mode_bin = th.argmax(counts)
-        if 0 < mode_bin < len(bins):
-            mode_val = (bins[mode_bin - 1] + bins[mode_bin]) / 2
-        else:
-            mode_val = bins[min(mode_bin, len(bins) - 1)]
+class ExponentialLinearRegressor(th.nn.Module):
+    """
+    # Learns a matrix W such that exp(W) \cdot X ≈ Y.
+    """
+    def __init__(self, input_dim: int, seed:int):
+        super().__init__()
+        th.manual_seed(seed)
+        self.W = th.nn.Parameter(th.randn(input_dim, input_dim))
 
-        modes.append(mode_val)
-    return th.stack(modes)
+    def forward(self, X: th.Tensor) -> th.Tensor:
+        """
+        X: (N, n) input matrix
+        Returns: (N, n) prediction
+        """
+        W_exp = th.matrix_exp(self.W)
+        return (W_exp @ X.T).T  # Apply from left, return (N, n)
+
+    def loss(self, X: th.Tensor, Y: th.Tensor) -> th.Tensor:
+        """
+        Computes MSE loss between predicted and true outputs.
+        """
+        Y_pred = self.forward(X)
+        return th.mean((Y - Y_pred) ** 2)
+
+    def fit(self, X: th.Tensor, Y: th.Tensor, lr: float = 1e-2,
+            epochs: int = 1000, verbose: bool = False):
+        """
+        Fits the model parameters to minimize MSE between exp(W) * X and Y.
+        """
+        optimizer = th.optim.Adam([self.W], lr=lr)
+        for epoch in range(epochs):
+            optimizer.zero_grad()
+            loss = self.loss(X, Y)
+            loss.backward()
+            optimizer.step()
+            if verbose and epoch % 100 == 0:
+                print(f"Epoch {epoch}: Loss = {loss.item():.6f}")
+        return self.W.data.clone()
