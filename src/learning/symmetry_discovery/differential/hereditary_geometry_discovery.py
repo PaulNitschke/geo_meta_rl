@@ -1,9 +1,10 @@
-import torch
 import warnings
-from tqdm import tqdm
-from typing import Literal, List, Tuple
 import logging
+from typing import Literal, List, Tuple, Optional
+
+from tqdm import tqdm
 import numpy as np
+import torch
 
 from ....utils import ExponentialLinearRegressor
 
@@ -20,6 +21,7 @@ class HereditaryGeometryDiscovery():
                  log_lg_inits_how:Literal['log_linreg', 'random']= 'log_linreg',
                  batch_size:int=64,
                  bandwidth:float=0.5,
+                 lasso_coef_lgs: Optional[float] = 0.5,
 
                  task_specifications:list=None,
                  use_oracle_rotation_kernel:bool=False,
@@ -40,7 +42,9 @@ class HereditaryGeometryDiscovery():
         - seed: random seed for reproducibility.
         - lg_inits_how: how to initialize left actions, one of ['random', 'mode', 'zeros']. Mode computes the mode of tasks_ps and then fits a linear regression between the modes.
         - batch_size: number of samples to use for optimization.
-        
+        - bandwidth: bandwidth for the kernel density frame estimators.
+        - lasso_coef_lgs: regularization weight for the lasso regularizer on the left actions, if None, no regularization is applied.
+
         - learn_left_actions: whether to learn left actions, only use for debugging.
         - learn_encoder_decoder: whether to learn the encoder and decoder, only use for debugging.
         - oracle_generator: tensor of shape (d, n, n), the generator to be used for symmetry discovery, only use for debugging.
@@ -64,6 +68,7 @@ class HereditaryGeometryDiscovery():
         self.batch_size=batch_size
         self.bandwidth=bandwidth
         self.seed=seed
+        self._lasso_coef_lgs=lasso_coef_lgs if lasso_coef_lgs is not None else 0.0
 
 
         self._use_oracle_rotation_kernel=use_oracle_rotation_kernel
@@ -85,12 +90,12 @@ class HereditaryGeometryDiscovery():
         self.frame_i_tasks= [self.tasks_frameestimators[i] for i in self.task_idxs]
 
         self._losses={}
-        self._losses["task_losses"]= []
-        self._losses["left_action_losses"]= []
+        self._losses["left_actions"]= []
+        self._losses["left_actions_tasks"]= []
+        self._losses["left_actions_tasks_reg"]= []
         self._losses["symmetry_losses"]= []
-        self._losses["reconstruction_losses"]= []
-        self._losses["generator_span_left_action_losses"]= []
-        self._losses["left_action_span_generator_losses"]=[]
+        self._losses["reconstruction"]= []
+        self._losses["generator"]= []
         
 
         # Optimization variables
@@ -140,35 +145,28 @@ class HereditaryGeometryDiscovery():
         lgs_frame_ps = torch.einsum("Nmn,bdn->Nbdm", lgs, frame_ps)
 
 
-        # 3. Compute projection loss.
-        def compute_ortho_loss(vec):
-            """Computes orthogonal complement loss by averaging norm of orthogonal complement across kernel dimensions and batch size."""
-            assert vec.dim()==4, "Vector field must be of shape (N, b, d, n)."
-            vec=torch.norm(vec, dim=(-1))
-            vec=vec.sum(-1)
-            return vec.mean(-1)
-
+        # 3. Compute orthogonal complement and projection loss.
         _, ortho_frame_i_lg_ps = self._project_onto_vector_subspace(frames_i_lg_ps, lgs_frame_ps)
         _, ortho_lgs_frame_ps = self._project_onto_vector_subspace(lgs_frame_ps, frames_i_lg_ps)
-        self.task_losses = compute_ortho_loss(ortho_frame_i_lg_ps) + compute_ortho_loss(ortho_lgs_frame_ps) 
+        mean_ortho_comp = lambda vec: torch.norm(vec, dim=(-1)).mean(-1).mean(-1)
+        self.task_losses = mean_ortho_comp(ortho_frame_i_lg_ps) + mean_ortho_comp(ortho_lgs_frame_ps)
+        self.task_losses_reg = self.task_losses + self._lasso_coef_lgs*torch.norm(log_lgs, p=1, dim=(-1)).mean(-1).mean(-1)
 
         if track_loss:
-            self._losses["left_action_losses"].append(self.task_losses.mean().detach().cpu().numpy())
-            self._losses["task_losses"].append(self.task_losses.detach().cpu().numpy())
+            self._losses["left_actions_tasks"].append(self.task_losses.detach().cpu().numpy())
+            self._losses["left_actions_tasks_reg"].append(self.task_losses_reg.detach().cpu().numpy())
+            self._losses["left_actions"].append(self.task_losses.mean().detach().cpu().numpy()) #exclude regularization term from this loss.
 
-        return self.task_losses.mean()
+        return self.task_losses_reg.mean()
     
 
     def evaluate_generator_span(self, generator, log_lgs, track_loss:bool=True)->float:
         """Evalutes whether all left-actions are inside the span of the generator."""
-        _, ortho_log_lgs_generator=self._project_onto_tensor_subspace(log_lgs, generator) #Are the left-actions inside the generator?
-        # ortho_generator_log_lgs=self.project_onto_tensor_subspace(generator, log_lgs) #Is the generator inside the span of the left-actions? We don't need this to be true, only to check whether generator_log_lgs is too large as sanity check.
+        _, ortho_log_lgs_generator=self._project_onto_tensor_subspace(log_lgs, generator)
         loss_span=torch.mean(torch.norm(ortho_log_lgs_generator, p="fro",dim=(1,2)),dim=0)
-        # loss_max = torch.norm(ortho_generator_log_lgs, dim=-1).sum(-1).mean()
 
         if track_loss:
-            self._losses["generator_span_left_action_losses"].append(loss_span.detach().cpu().numpy())
-            # self._losses["left_action_span_generator_losses"].append(loss_max.detach().cpu().numpy())
+            self._losses["generator"].append(loss_span.detach().cpu().numpy())
         return loss_span
 
     
@@ -180,6 +178,10 @@ class HereditaryGeometryDiscovery():
         warnings.warn("Using oracle generator. Only use for debugging.")
         warnings.warn("Implementation not correct yet.")
 
+        def compute_vec_jacobian(f: callable, s: torch.tensor)->torch.tensor:
+            """Compute a vectorized Jacobian of function f over a batch of states s."""
+            return torch.vmap(torch.func.jacrev(f))(s)
+
         # 1. Sample points from the base task.
         ps = self.tasks_ps[self.base_task_index][torch.randint(0, self._n_samples, (self.batch_size,))]
         
@@ -187,22 +189,23 @@ class HereditaryGeometryDiscovery():
         tilde_ps=self.encoder(ps)
 
         # 3. Let generator act on points.
-        gen_tilde_ps = torch.einsum("dnm,bm->dbn", self.oracle_generator, tilde_ps)  # shape (d, b, n)
+        gen_tilde_ps = torch.einsum("dnm,bm->dbn", self.oracle_generator, tilde_ps)
 
         # 4. Decode points back to ambient space.
-        gen_ps = self.decoder(gen_tilde_ps).unsqueeze(0) #shape(1, b, d, n) for projection function.
+        gen_ps=compute_vec_jacobian(self.decoder, gen_tilde_ps).unsqueeze(0) #this is not quite correct yet. need to think about 
+        # at whichi point to compute the jacobian and then left multiply it against the gen_tilde_ps I think.
 
         # 5. Check symmetry
         goal_base = self.task_specifications[self.base_task_index]['goal']
         frame_ps= self.rotation_vector_field(ps, center=goal_base)
-        frame_ps=frame_ps.unsqueeze(0) #shape(1, b, d, n) for projection function.
+        frame_ps=frame_ps.unsqueeze(0)
 
-        gen_into_frame = self._ortho_comp(gen_ps, frame_ps)
+        _, gen_into_frame = self._project_onto_vector_subspace(gen_ps, frame_ps)
         self.loss_symmetry= torch.norm(gen_into_frame, dim=(-1)).sum(-1).mean()
 
         self.loss_reconstruction= torch.norm(ps - self.decoder(self.encoder(gen_ps)), dim=(-1)).mean()
 
-        warnings.warn("Need to enfore that encoder and decoder are identity in the beginning. Also need to use derivative of decoder Jacobian.")
+        warnings.warn("Need to enfore that encoder and decoder are identity in the beginning.")
 
         return self.loss_symmetry+self.loss_reconstruction
         
@@ -279,16 +282,6 @@ class HereditaryGeometryDiscovery():
             self.optimizer_decoder.step()
 
 
-        # for optimizer in self.optimizer_lgs:
-        #     optimizer.zero_grad()
-
-        # loss = compute_joint_loss(self.lgs)
-        # loss.backward()
-
-        # for optimizer in self.optimizer_lgs:
-        #     optimizer.step()
-    
-
     def optimize(self, n_steps:int=1000):
         """Optimizes the left action."""
         progress_bar = tqdm(range(n_steps), desc="Inferring left-action")
@@ -301,14 +294,14 @@ class HereditaryGeometryDiscovery():
 
                 if self._learn_left_actions:
                     prog_bar_description += (
-                        f"Left-Action Loss: {round(self._losses['left_action_losses'][-1].item(), 3)} | "
-                        f"Task Losses: {np.round(self._losses['task_losses'][-1], 3)} | "
+                        f"Left-Action Loss: {round(self._losses['left_actions'][-1].item(), 3)} | "
+                        f"Task Losses: {np.round(self._losses['left_actions_tasks'][-1], 3)} | "
+                        f"Task Losses (reg): {np.round(self._losses['left_actions_tasks_reg'][-1], 3)} | "
                     )
 
                 if self._learn_generator:
                     prog_bar_description += (
-                        f"Generator Span Loss: {round(self._losses['generator_span_left_action_losses'][-1].item(), 3)} | "
-                        # f"Inverse Generator Span Loss: {round(self._losses['left_action_span_generator_losses'][-1].item(), 3)}"
+                        f"Generator Span Loss: {round(self._losses['generator'][-1].item(), 3)} | "
                     )
 
                 progress_bar.set_description(prog_bar_description.strip(" | "))
@@ -353,10 +346,8 @@ class HereditaryGeometryDiscovery():
     def losses(self):
         """Returns all losses."""
         return {
-            "left_action_losses": np.array(self._losses["left_action_losses"]),
-            "task_losses": np.array(self._losses["task_losses"]),
-            "symmetry_losses": np.array(self._losses["symmetry_losses"]),
-            "reconstruction_losses": np.array(self._losses["reconstruction_losses"]),
-            "generator_span_left_action_losses": np.array(self._losses["generator_span_left_action_losses"]),
-            "left_action_span_generator_losses": np.array(self._losses["left_action_span_generator_losses"]),
+            "left_actions": np.array(self._losses["left_actions"]),
+            "left_actions_tasks": np.array(self._losses["left_actions_tasks"]),
+            "left_actions_tasks_reg": np.array(self._losses["left_actions_tasks_reg"]),
+            "generator": np.array(self._losses["generator"]),
         }
