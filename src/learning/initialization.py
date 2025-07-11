@@ -2,7 +2,9 @@ from tqdm import tqdm
 import torch as th
 
 """
-Functions for initialization for hereditary symmetry discovery.
+Classes and functions for initialization for hereditary symmetry discovery.
+ExponentialLinearRegressor: intializes left-actions.
+identity_init_neural_net: initializes a neural network to the identity (used for encoder and decoder).
 """
 
 
