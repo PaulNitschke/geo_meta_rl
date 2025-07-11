@@ -189,13 +189,16 @@ class HereditaryGeometryDiscovery():
         tilde_ps=self.encoder(ps)
 
         # 3. Let generator act on points.
-        gen_tilde_ps = torch.einsum("dnm,bm->dbn", self.oracle_generator, tilde_ps)
+        gen_tilde_ps = torch.einsum("dnm,bm->bdn", self.oracle_generator, tilde_ps)
 
-        # 4. Decode points back to ambient space.
-        gen_ps=compute_vec_jacobian(self.decoder, gen_tilde_ps).unsqueeze(0) #this is not quite correct yet. need to think about 
+        # 4. Decode points back     to ambient space.
+        jac_decoder=compute_vec_jacobian(self.decoder, gen_tilde_ps).unsqueeze(0)
+        gen_ps = torch.einsum("bdmn, bdn->bdm", jac_decoder, gen_tilde_ps)
+        
+        #this is not quite correct yet. need to think about 
         # at whichi point to compute the jacobian and then left multiply it against the gen_tilde_ps I think.
 
-        # 5. Check symmetry
+        # 5. Check symmetry, need to evaluate frame at base points.
         goal_base = self.task_specifications[self.base_task_index]['goal']
         frame_ps= self.rotation_vector_field(ps, center=goal_base)
         frame_ps=frame_ps.unsqueeze(0)
