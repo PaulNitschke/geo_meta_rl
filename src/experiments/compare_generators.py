@@ -5,8 +5,8 @@ import torch
 from tqdm import tqdm
 
 from constants import DTYPE
-from src.learning.symmetry_discovery.differential.diff_generator import DiffGenerator
-from src.learning.symmetry_discovery.functional.func_generator import FuncGenerator
+from src.learning.symmetry_discovery.diff_generator import DiffGenerator
+from src.learning.symmetry_discovery.func_generator import FuncGenerator
 
 class DiffFuncGenerator(DiffGenerator, FuncGenerator):
     """Learns a differential generator via both differential and functional symmetry discovery."""
