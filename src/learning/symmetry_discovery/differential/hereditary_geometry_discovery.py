@@ -84,6 +84,9 @@ class HereditaryGeometryDiscovery():
         self._learn_encoder_decoder=learn_encoder_decoder
 
         self._validate_inputs()
+        logging.info("Fitting left-actions: ", self._learn_left_actions)
+        logging.info("Fitting generator: ", self._learn_generator)
+        logging.info("Fitting encoder and decoder: ", self._learn_encoder_decoder)
 
 
         self.ambient_dim=tasks_ps[0][0,:].shape[0]
@@ -98,10 +101,12 @@ class HereditaryGeometryDiscovery():
         self._losses["left_actions"]= []
         self._losses["left_actions_tasks"]= []
         self._losses["left_actions_tasks_reg"]= []
+
         self._losses["generator"]= []
+        
         self._losses["symmetry"]= []
         self._losses["reconstruction"]= []
-        
+        self._losses["symmetry_reg"] = []
 
         # Optimization variables
         torch.manual_seed(seed)
@@ -139,7 +144,7 @@ class HereditaryGeometryDiscovery():
         lgs=torch.linalg.matrix_exp(log_lgs)
         lg_ps = torch.einsum("Nmn,bn->Nbm", lgs, ps)
 
-
+        #TODO, need to do this in latent space.
         # 2. Sample tangent vectors and push-forward tangent vectors
         if not self._use_oracle_rotation_kernel:
             frame_ps=self.frame_base_task.evaluate(ps, bandwidth=self.bandwidth).transpose(-1, -2)
@@ -162,14 +167,14 @@ class HereditaryGeometryDiscovery():
         _, ortho_lgs_frame_ps = self._project_onto_vector_subspace(lgs_frame_ps, frames_i_lg_ps)
         mean_ortho_comp = lambda vec: torch.norm(vec, dim=(-1)).mean(-1).mean(-1)
         self.task_losses = mean_ortho_comp(ortho_frame_i_lg_ps) + mean_ortho_comp(ortho_lgs_frame_ps)
-        self.task_losses_reg = self.task_losses + self._lasso_coef_lgs*torch.norm(log_lgs, p=1, dim=(-1)).mean(-1).mean(-1)
+        self.task_losses_reg = self._lasso_coef_lgs*torch.norm(log_lgs, p=1, dim=(-1)).mean(-1).mean(-1)
 
         if track_loss:
             self._losses["left_actions_tasks"].append(self.task_losses.detach().cpu().numpy())
             self._losses["left_actions_tasks_reg"].append(self.task_losses_reg.detach().cpu().numpy())
             self._losses["left_actions"].append(self.task_losses.mean().detach().cpu().numpy()) #exclude regularization term from this loss.
 
-        return self.task_losses_reg.mean()
+        return self.task_losses + self.task_losses_reg.mean()
     
 
     def evaluate_generator_span(self, generator, log_lgs, track_loss:bool=True)->float:
@@ -224,8 +229,9 @@ class HereditaryGeometryDiscovery():
         if track_loss:
             self._losses["symmetry"].append(loss_symmetry.detach().cpu().numpy())
             self._losses["reconstruction"].append(loss_reconstruction.detach().cpu().numpy())
+            self._losses["symmetry_reg"].append(loss_reg.detach().cpu().numpy())
 
-        return loss_symmetry+loss_reconstruction
+        return loss_symmetry+loss_reconstruction+loss_reg
         
 
     def _project_onto_vector_subspace(self, vecs, basis):
@@ -380,5 +386,6 @@ class HereditaryGeometryDiscovery():
             "left_actions_tasks_reg": np.array(self._losses["left_actions_tasks_reg"]),
             "generator": np.array(self._losses["generator"]),
             "symmetry": np.array(self._losses["symmetry"]),
-            "reconstruction": np.array(self._losses["reconstruction"])
+            "reconstruction": np.array(self._losses["reconstruction"]),
+            "symmetry_reg": np.array(self._losses["symmetry_reg"]),
         }
