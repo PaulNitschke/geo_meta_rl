@@ -1,12 +1,14 @@
 import warnings
+import time
 import logging
 from typing import Literal, List, Tuple, Optional
 
 from tqdm import tqdm
 import numpy as np
 import torch
+import wandb
 
-from ...initialization import identity_init_neural_net, ExponentialLinearRegressor
+from ..initialization import identity_init_neural_net, ExponentialLinearRegressor
 
 
 class HereditaryGeometryDiscovery():
@@ -23,8 +25,9 @@ class HereditaryGeometryDiscovery():
                  bandwidth:float=0.5,
 
                  lasso_coef_lgs: Optional[float] = 0.5,
-                 lasso_coef_encoder_decoder: Optional[float] = 0.5,
+                 lasso_coef_encoder_decoder: Optional[float] = 0.005,
 
+                 log_wandb:bool=False,
                  task_specifications:list=None,
                  use_oracle_rotation_kernel:bool=False,
                  oracle_generator: torch.tensor=None,
@@ -72,10 +75,9 @@ class HereditaryGeometryDiscovery():
         self.seed=seed
 
         self._lasso_coef_lgs=lasso_coef_lgs if lasso_coef_lgs is not None else 0.0
-
         self._lasso_coef_encoder_decoder=lasso_coef_encoder_decoder if lasso_coef_encoder_decoder is not None else 0.0
 
-
+        self._log_wandb=log_wandb
         self._use_oracle_rotation_kernel=use_oracle_rotation_kernel
         self.task_specifications=task_specifications
         self.oracle_generator= oracle_generator
@@ -84,9 +86,10 @@ class HereditaryGeometryDiscovery():
         self._learn_encoder_decoder=learn_encoder_decoder
 
         self._validate_inputs()
-        logging.info("Fitting left-actions: ", self._learn_left_actions)
-        logging.info("Fitting generator: ", self._learn_generator)
-        logging.info("Fitting encoder and decoder: ", self._learn_encoder_decoder)
+
+        logging.info(f"Fitting left-actions: {self._learn_left_actions}")
+        logging.info(f"Fitting generator: {self._learn_generator}")
+        logging.info(f"Fitting encoder and decoder: {self._learn_encoder_decoder}")
 
 
         self.ambient_dim=tasks_ps[0][0,:].shape[0]
@@ -98,22 +101,22 @@ class HereditaryGeometryDiscovery():
         self.frame_i_tasks= [self.tasks_frameestimators[i] for i in self.task_idxs]
 
         self._losses={}
-        self._losses["left_actions"]= []
-        self._losses["left_actions_tasks"]= []
-        self._losses["left_actions_tasks_reg"]= []
+        self._losses["left_actions"]= [0]
+        self._losses["left_actions_tasks"]= [0]
+        self._losses["left_actions_tasks_reg"]= [0]
 
-        self._losses["generator"]= []
+        self._losses["generator"]= [0]
         
-        self._losses["symmetry"]= []
-        self._losses["reconstruction"]= []
-        self._losses["symmetry_reg"] = []
+        self._losses["symmetry"]= [0]
+        self._losses["reconstruction"]= [0]
+        self._losses["symmetry_reg"] = [0]
 
         # Optimization variables
         torch.manual_seed(seed)
 
         if self._learn_left_actions:
             if self._log_lg_inits_how == 'log_linreg':
-                self._log_lg_inits=self._init_log_lgs_linear_reg(verbose=False, epochs=2500)
+                self._log_lg_inits=self._init_log_lgs_linear_reg(verbose=False, epochs=2500, log_wandb=self._log_wandb)
 
             elif self._log_lg_inits_how == 'random':
                 self._log_lg_inits = torch.randn(size=(self._n_tasks-1, self.ambient_dim, self.ambient_dim))
@@ -130,8 +133,8 @@ class HereditaryGeometryDiscovery():
 
 
         if self._learn_encoder_decoder:
-            self.encoder= identity_init_neural_net(self.encoder, tasks_ps=self.tasks_ps)
-            self.decoder= identity_init_neural_net(self.decoder, tasks_ps=self.tasks_ps)
+            self.encoder= identity_init_neural_net(self.encoder, tasks_ps=self.tasks_ps, name="encoder", log_wandb=self._log_wandb)
+            self.decoder= identity_init_neural_net(self.decoder, tasks_ps=self.tasks_ps, name="decoder", log_wandb=self._log_wandb)
             self.optimizer_encoder=torch.optim.Adam(self.encoder.parameters(), lr=0.00035)
             self.optimizer_decoder=torch.optim.Adam(self.decoder.parameters(), lr=0.00035)
 
@@ -312,7 +315,11 @@ class HereditaryGeometryDiscovery():
 
         for n_steps in progress_bar:
             self.take_grad_step()
-            
+
+            if n_steps % 25 == 0:
+                self._log_to_wandb(n_steps)
+                time.sleep(0.05)            
+
             if n_steps % 50 == 0 and n_steps > 0:
                 prog_bar_description = ""
 
@@ -365,6 +372,23 @@ class HereditaryGeometryDiscovery():
             for idx_task in self.task_idxs]
         logging.info("Finished fitting log-linear regressors to initialize left actions.")       
         return torch.stack(self._log_lg_inits, dim=0)
+    
+
+    def _log_to_wandb(self, step:int):
+        """Logs losses to weights and biases."""
+        if not self._log_wandb:
+            return
+
+        wandb.log({
+            "train/left_actions/mean": float(self._losses['left_actions'][-1]),
+            "train/left_actions/tasks": float(self._losses['left_actions_tasks'][-1]),
+            "train/generator": float(self._losses['generator'][-1]),
+            "train/symmetry/span": float(self._losses['symmetry'][-1]),
+            "train/symmetry/reconstruction": float(self._losses['reconstruction'][-1]),
+            "train/regularizers/symmetry": float(self._losses['symmetry_reg'][-1]),
+            "train/regularizers/left_actions/lasso": float(self._losses['left_actions_tasks_reg'][-1]),
+            "_step": step
+        })
 
 
     @property
@@ -381,11 +405,11 @@ class HereditaryGeometryDiscovery():
     def losses(self):
         """Returns all losses."""
         return {
-            "left_actions": np.array(self._losses["left_actions"]),
-            "left_actions_tasks": np.array(self._losses["left_actions_tasks"]),
-            "left_actions_tasks_reg": np.array(self._losses["left_actions_tasks_reg"]),
-            "generator": np.array(self._losses["generator"]),
-            "symmetry": np.array(self._losses["symmetry"]),
-            "reconstruction": np.array(self._losses["reconstruction"]),
-            "symmetry_reg": np.array(self._losses["symmetry_reg"]),
+            "left_actions": np.array(self._losses["left_actions"][1:]),
+            "left_actions_tasks": np.array(self._losses["left_actions_tasks"][1:]),
+            "left_actions_tasks_reg": np.array(self._losses["left_actions_tasks_reg"][1:]),
+            "generator": np.array(self._losses["generator"][1:]),
+            "symmetry": np.array(self._losses["symmetry"][1:]),
+            "reconstruction": np.array(self._losses["reconstruction"][1:]),
+            "symmetry_reg": np.array(self._losses["symmetry_reg"][1:]),
         }

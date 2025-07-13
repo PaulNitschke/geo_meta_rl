@@ -1,4 +1,6 @@
 import pickle
+import os
+import warnings
 
 import numpy as np
 import torch as th
@@ -7,8 +9,7 @@ from gym import spaces
 
 from garage import EnvStep
 from garage import StepType
-
-import warnings
+from .learning.symmetry.kernel_approx import KernelFrameEstimator
 
 class GarageToGymWrapper(gym.Env):
     """Converts a garage environment into a gym environment which can be used by Stable Baselines."""
@@ -42,6 +43,37 @@ class GarageToGymWrapper(gym.Env):
 
     def close(self):
         self._env.close()
+
+
+class Affine2D(th.nn.Module):
+    """An affine neural network."""
+    def __init__(self, input_dim, output_dim):
+        super().__init__()
+        self.linear = th.nn.Linear(input_dim, output_dim, bias=True)
+
+    def forward(self, x):
+        return self.linear(x)
+
+def load_replay_buffer_and_kernel(task_name:str, load_what:str, kernel_dim: int, n_samples:int, folder_name):
+    """Loads samples and kernel evaluator of a task."""
+
+    assert load_what in ["observations", "actions", "next_observations"], "Learn hereditary geometry for states, actions or next states."
+
+    buffer_name= os.path.join(folder_name, f"{task_name}_replay_buffer.pkl")
+    kernel_name= os.path.join(folder_name, f"{task_name}_kernel_bases.pkl")
+
+
+    buffer= load_replay_buffer(buffer_name, N_steps=n_samples)
+    ps=buffer[load_what]
+    print(f"Loaded {load_what} from {buffer_name} with shape {ps.shape}")
+
+    # Load kernel bases
+    frameestimator=KernelFrameEstimator(ps=ps, kernel_dim=kernel_dim)
+    with open(kernel_name, 'rb') as f:
+        kernel_samples = pickle.load(f)
+    frameestimator.set_frame(frame=kernel_samples)
+
+    return ps, frameestimator
 
 
 def load_replay_buffer(path: str,

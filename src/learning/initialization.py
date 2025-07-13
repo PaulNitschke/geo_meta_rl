@@ -1,4 +1,7 @@
+import time
 from tqdm import tqdm
+
+import wandb
 import torch as th
 
 """
@@ -12,10 +15,11 @@ class ExponentialLinearRegressor(th.nn.Module):
     """
     # Learns a matrix W such that exp(W) \cdot X ≈ Y.
     """
-    def __init__(self, input_dim: int, seed:int):
+    def __init__(self, input_dim: int, seed:int, log_wand:bool=False):
         super().__init__()
         th.manual_seed(seed)
         self.W = th.nn.Parameter(th.randn(input_dim, input_dim))
+        self.log_wand = log_wand
 
     def forward(self, X: th.Tensor) -> th.Tensor:
         """
@@ -45,11 +49,16 @@ class ExponentialLinearRegressor(th.nn.Module):
             optimizer.step()
             if verbose and epoch % 100 == 0:
                 print(f"Epoch {epoch}: Loss = {loss.item():.6f}")
+            if self.log_wand and epoch % 100 == 0:
+                wandb.log({"init/log_left_actions": loss.item()})
+                time.sleep(0.05)     
         return self.W.data.clone()
     
 
 def identity_init_neural_net(network: callable, 
                              tasks_ps: list,
+                             name:str="network",
+                             log_wandb:bool=False,
                              n_steps: int = 5_000):
     """Initializes a neural network to the identity map on all tasks via gradient flow."""
 
@@ -82,4 +91,8 @@ def identity_init_neural_net(network: callable,
             pbar.set_postfix({
                 "total": f"{loss.item():.4e}"
             })
+
+        if log_wandb and step % 100 == 0:
+            wandb.log({f"init/identity_{name}": loss.item()})
+            time.sleep(0.05)     
     return network
