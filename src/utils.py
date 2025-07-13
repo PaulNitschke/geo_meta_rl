@@ -45,6 +45,15 @@ class GarageToGymWrapper(gym.Env):
         self._env.close()
 
 
+class Affine2D(th.nn.Module):
+    """An affine neural network."""
+    def __init__(self, input_dim, output_dim):
+        super().__init__()
+        self.linear = th.nn.Linear(input_dim, output_dim, bias=True)
+
+    def forward(self, x):
+        return self.linear(x)
+
 def load_replay_buffer_and_kernel(task_name:str, load_what:str, kernel_dim: int, n_samples:int, folder_name):
     """Loads samples and kernel evaluator of a task."""
 
