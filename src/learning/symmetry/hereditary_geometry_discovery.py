@@ -6,7 +6,7 @@ from tqdm import tqdm
 import numpy as np
 import torch
 
-from ...initialization import identity_init_neural_net, ExponentialLinearRegressor
+from ..initialization import identity_init_neural_net, ExponentialLinearRegressor
 
 
 class HereditaryGeometryDiscovery():
