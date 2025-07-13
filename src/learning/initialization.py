@@ -1,4 +1,7 @@
+import time
 from tqdm import tqdm
+
+import wandb
 import torch as th
 
 """
@@ -46,9 +49,9 @@ class ExponentialLinearRegressor(th.nn.Module):
             optimizer.step()
             if verbose and epoch % 100 == 0:
                 print(f"Epoch {epoch}: Loss = {loss.item():.6f}")
-            if self.log_wand:
-                import wandb
+            if self.log_wand and epoch % 100 == 0:
                 wandb.log({"init/log_left_actions": loss.item()})
+                time.sleep(0.05)     
         return self.W.data.clone()
     
 
@@ -89,7 +92,7 @@ def identity_init_neural_net(network: callable,
                 "total": f"{loss.item():.4e}"
             })
 
-        if log_wandb:
-            import wandb
+        if log_wandb and step % 100 == 0:
             wandb.log({f"init/identity_{name}": loss.item()})
+            time.sleep(0.05)     
     return network

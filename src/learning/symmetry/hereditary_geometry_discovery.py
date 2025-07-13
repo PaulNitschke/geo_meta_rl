@@ -1,4 +1,5 @@
 import warnings
+import time
 import logging
 from typing import Literal, List, Tuple, Optional
 
@@ -314,8 +315,11 @@ class HereditaryGeometryDiscovery():
 
         for n_steps in progress_bar:
             self.take_grad_step()
-            self._log_to_wandb(n_steps)
-            
+
+            if n_steps % 25 == 0:
+                self._log_to_wandb(n_steps)
+                time.sleep(0.05)            
+
             if n_steps % 50 == 0 and n_steps > 0:
                 prog_bar_description = ""
 
@@ -378,12 +382,12 @@ class HereditaryGeometryDiscovery():
         wandb.log({
             "train/left_actions/mean": float(self._losses['left_actions'][-1]),
             "train/left_actions/tasks": float(self._losses['left_actions_tasks'][-1]),
-            "train/left_actions/lasso": float(self._losses['left_actions_tasks_reg'][-1]),
             "train/generator": float(self._losses['generator'][-1]),
             "train/symmetry/span": float(self._losses['symmetry'][-1]),
             "train/symmetry/reconstruction": float(self._losses['reconstruction'][-1]),
-            "train/symmetry/lasso": float(self._losses['symmetry_reg'][-1]),
-            "step": step
+            "train/regularizers/symmetry": float(self._losses['symmetry_reg'][-1]),
+            "train/regularizers/left_actions/lasso": float(self._losses['left_actions_tasks_reg'][-1]),
+            "_step": step
         })
 
 
