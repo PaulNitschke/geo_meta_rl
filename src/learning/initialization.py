@@ -15,11 +15,11 @@ class ExponentialLinearRegressor(th.nn.Module):
     """
     # Learns a matrix W such that exp(W) \cdot X ≈ Y.
     """
-    def __init__(self, input_dim: int, seed:int, log_wand:bool=False):
+    def __init__(self, input_dim: int, seed:int, log_wandb:bool=True):
         super().__init__()
         th.manual_seed(seed)
         self.W = th.nn.Parameter(th.randn(input_dim, input_dim))
-        self.log_wand = log_wand
+        self.log_wandb = log_wandb
 
     def forward(self, X: th.Tensor) -> th.Tensor:
         """
@@ -49,7 +49,7 @@ class ExponentialLinearRegressor(th.nn.Module):
             optimizer.step()
             if verbose and epoch % 100 == 0:
                 print(f"Epoch {epoch}: Loss = {loss.item():.6f}")
-            if self.log_wand and epoch % 100 == 0:
+            if self.log_wandb and (epoch % 50 == 0):
                 wandb.log({"init/log_left_actions": loss.item()})
                 time.sleep(0.05)     
         return self.W.data.clone()

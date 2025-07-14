@@ -126,17 +126,15 @@ class HereditaryGeometryDiscovery():
             assert self.log_lgs.shape == (self._n_tasks-1, self.ambient_dim, self.ambient_dim), "Log left actions must be of shape (N_tasks-1, n, n)."
         
 
-        if self._learn_generator:
-            self.generator=torch.nn.Parameter(torch.randn(size=(self.kernel_dim, self.ambient_dim, self.ambient_dim))) if self.oracle_generator is None else torch.nn.Parameter(self.oracle_generator.clone())
-            assert self.generator.shape == (self.kernel_dim, self.ambient_dim, self.ambient_dim), "Generator must be of shape (d, n, n)."
-            self.optimizer_generator=torch.optim.Adam([self.generator], lr=0.00035)
+        self.generator=torch.nn.Parameter(torch.randn(size=(self.kernel_dim, self.ambient_dim, self.ambient_dim))) if self.oracle_generator is None else torch.nn.Parameter(self.oracle_generator.clone())
+        assert self.generator.shape == (self.kernel_dim, self.ambient_dim, self.ambient_dim), "Generator must be of shape (d, n, n)."
+        self.optimizer_generator=torch.optim.Adam([self.generator], lr=0.00035)
 
 
-        if self._learn_encoder_decoder:
-            self.encoder= identity_init_neural_net(self.encoder, tasks_ps=self.tasks_ps, name="encoder", log_wandb=self._log_wandb)
-            self.decoder= identity_init_neural_net(self.decoder, tasks_ps=self.tasks_ps, name="decoder", log_wandb=self._log_wandb)
-            self.optimizer_encoder=torch.optim.Adam(self.encoder.parameters(), lr=0.00035)
-            self.optimizer_decoder=torch.optim.Adam(self.decoder.parameters(), lr=0.00035)
+        self.encoder= identity_init_neural_net(self.encoder, tasks_ps=self.tasks_ps, name="encoder", log_wandb=self._log_wandb)
+        self.decoder= identity_init_neural_net(self.decoder, tasks_ps=self.tasks_ps, name="decoder", log_wandb=self._log_wandb)
+        self.optimizer_encoder=torch.optim.Adam(self.encoder.parameters(), lr=0.00035)
+        self.optimizer_decoder=torch.optim.Adam(self.decoder.parameters(), lr=0.00035)
 
     
     def evalute_left_actions(self, log_lgs: torch.Tensor, track_loss:bool=True) -> float:
@@ -144,8 +142,10 @@ class HereditaryGeometryDiscovery():
         # 1. Sample points and push-forward
         _b_idxs= torch.randint(0, self._n_samples, (self.batch_size,))
         ps = self.tasks_ps[self.base_task_index][_b_idxs]
+        tilde_ps=self.encoder(ps)
         lgs=torch.linalg.matrix_exp(log_lgs)
-        lg_ps = torch.einsum("Nmn,bn->Nbm", lgs, ps)
+        lg_tilde_ps = torch.einsum("Nmn,bn->Nbm", lgs, tilde_ps)
+        lg_ps = self.decoder(lg_tilde_ps)
 
         #TODO, need to do this in latent space.
         # 2. Sample tangent vectors and push-forward tangent vectors
@@ -177,7 +177,7 @@ class HereditaryGeometryDiscovery():
             self._losses["left_actions_tasks_reg"].append(self.task_losses_reg.detach().cpu().numpy())
             self._losses["left_actions"].append(self.task_losses.mean().detach().cpu().numpy()) #exclude regularization term from this loss.
 
-        return self.task_losses + self.task_losses_reg.mean()
+        return self.task_losses.mean() + self.task_losses_reg
     
 
     def evaluate_generator_span(self, generator, log_lgs, track_loss:bool=True)->float:
@@ -195,10 +195,8 @@ class HereditaryGeometryDiscovery():
         Evaluates whether the generator is contained within the kernel distribution of the base task (expressed in the encoder and decoder).
         For stable learning, ensure that encoder and decoder are both identity maps in the beginning.
         """
-        assert self.oracle_generator is not None, "Oracle generator must be provided to evaluate symmetry."
         assert self.encoder is not None, "Provide an encoder to evaluate symmetry."
         assert self.decoder is not None, "Provide a decoder to evaluate symmetry."
-        warnings.warn("Using oracle generator. Only use for debugging.")
 
         def compute_vec_jacobian(f: callable, s: torch.tensor)->torch.tensor:
             """
@@ -212,11 +210,12 @@ class HereditaryGeometryDiscovery():
 
         # Let the generator act on the points in latent space.
         tilde_ps=self.encoder(ps)
-        gen_tilde_ps = torch.einsum("dnm,bm->bdn", self.oracle_generator, tilde_ps)
+        gen_tilde_ps = torch.einsum("dnm,bm->bdn", self.generator, tilde_ps)
         jac_decoder=compute_vec_jacobian(self.decoder, gen_tilde_ps)
         gen_ps = torch.einsum("bdmn, bdn->bdm", jac_decoder, gen_tilde_ps)
 
         # Check symmetry, need to evaluate frame at base points.
+        #TODO, using ground truth kernel distribution.
         goal_base = self.task_specifications[self.base_task_index]['goal']
         frame_ps= self.rotation_vector_field(ps, center=goal_base)
         frame_ps=frame_ps.unsqueeze(0)
@@ -356,17 +355,19 @@ class HereditaryGeometryDiscovery():
         """Validates user inputs."""
         assert self._log_lg_inits_how in ['random', 'log_linreg'], "_log_lg_inits_how must be one of ['random', 'log_linreg']."
         assert len(self.tasks_ps) == len(self.tasks_frameestimators), "Number of tasks and frame estimators must match."
+        assert self.oracle_generator is None if self._learn_generator else True, "If you want to learn the generator, do not provide an oracle generator."
+        assert self.oracle_generator is not None if not self._learn_generator else True, "If you do not want to learn the generator, provide an oracle generator."
 
         if self._learn_encoder_decoder:
             assert self.encoder is not None, "Encoder must be provided to learn symmetry."
             assert self.decoder is not None, "Decoder must be provided to learn symmetry."
 
 
-    def _init_log_lgs_linear_reg(self, verbose=False, epochs=1000):
+    def _init_log_lgs_linear_reg(self, verbose=False, epochs=1000, log_wandb:bool=False):
         """Fits log-linear regressors to initialize left actions."""
         logging.info("Fitting log-linear regressors to initialize left actions.")
         self._log_lg_inits = [
-            ExponentialLinearRegressor(input_dim=self.ambient_dim, seed=self.seed).fit(
+            ExponentialLinearRegressor(input_dim=self.ambient_dim, seed=self.seed, log_wandb=log_wandb).fit(
                 X=self.tasks_ps[0], Y=self.tasks_ps[idx_task], verbose=verbose, epochs=epochs
             )
             for idx_task in self.task_idxs]
@@ -381,7 +382,7 @@ class HereditaryGeometryDiscovery():
 
         wandb.log({
             "train/left_actions/mean": float(self._losses['left_actions'][-1]),
-            "train/left_actions/tasks": float(self._losses['left_actions_tasks'][-1]),
+            # "train/left_actions/tasks": float(self._losses['left_actions_tasks'][-1]), #TODO, log task level losses.
             "train/generator": float(self._losses['generator'][-1]),
             "train/symmetry/span": float(self._losses['symmetry'][-1]),
             "train/symmetry/reconstruction": float(self._losses['reconstruction'][-1]),
