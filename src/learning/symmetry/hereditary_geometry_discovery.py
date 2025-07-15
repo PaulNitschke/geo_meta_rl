@@ -370,6 +370,10 @@ class HereditaryGeometryDiscovery():
 
             self._set_progress_bar()
 
+            if step_counter==n_steps:
+                logging.info("Reached maximum number of steps, stopping optimization.")
+                break
+
 
     def rotation_vector_field(self, p_batch: torch.tensor, center)->torch.tensor:
         """Returns kernel samples at batched points p from a task."""

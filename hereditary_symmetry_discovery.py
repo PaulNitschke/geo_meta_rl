@@ -35,7 +35,7 @@ def train(lr_chart, update_chart_every_n_steps):
     LEARN_GENERATOR=True
     LEARN_ENCODER_DECODER=True
     USE_ORACLE_ROTATION_KERNEL=True
-    N_STEPS=25_000
+    N_STEPS=250_000
     BATCH_SIZE=128
     BANDWIDTH=None
     LEARNING_RATE_LEFT_ACTIONS=0.00035
