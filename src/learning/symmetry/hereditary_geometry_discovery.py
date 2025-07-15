@@ -27,7 +27,7 @@ class HereditaryGeometryDiscovery():
                  update_chart_every_n_steps:int=1,
                  lasso_coef_lgs: Optional[float] = 0.5,
                  lasso_coef_encoder_decoder: Optional[float] = 0.005,
-                 learning_rate_left_actions:float=0.00035,
+                 learning_rate_left_actions:float=0.0035,
                  learning_rate_generator:float=0.00035,
                  learning_rate_encoder:float=0.00035,
                  learning_rate_decoder:float=0.00035,
@@ -149,13 +149,18 @@ class HereditaryGeometryDiscovery():
         self.optimizer_decoder=torch.optim.Adam(self.decoder.parameters(), lr=self._learning_rate_decoder)
 
     
-    def evalute_left_actions(self, ps: torch.Tensor, log_lgs: torch.Tensor, track_loss:bool=True) -> float:
+    def evalute_left_actions(self, 
+                             ps: torch.Tensor, 
+                             log_lgs: torch.Tensor, 
+                             encoder: torch.nn.Module,
+                             decoder: torch.nn.Module,
+                             track_loss:bool=True) -> float:
         """Computes kernel alignment loss of all left-actions."""
         # 1. Push-forward
-        tilde_ps=self.encoder(ps)
+        tilde_ps=encoder(ps)
         lgs=torch.linalg.matrix_exp(log_lgs)
         lg_tilde_ps = torch.einsum("Nmn,bn->Nbm", lgs, tilde_ps)
-        lg_ps = self.decoder(lg_tilde_ps)
+        lg_ps = decoder(lg_tilde_ps)
 
         # 2. Sample tangent vectors and push-forward tangent vectors
         if not self._use_oracle_rotation_kernel:
@@ -189,7 +194,10 @@ class HereditaryGeometryDiscovery():
         return self.task_losses.mean() + self.task_losses_reg
     
 
-    def evaluate_generator_span(self, generator, log_lgs, track_loss:bool=True)->float:
+    def evaluate_generator_span(self, 
+                                generator: torch.Tensor, 
+                                log_lgs: torch.Tensor, 
+                                track_loss:bool=True)->float:
         """Evalutes whether all left-actions are inside the span of the generator."""
         _, ortho_log_lgs_generator=self._project_onto_tensor_subspace(log_lgs, generator)
         loss_span=torch.mean(torch.norm(ortho_log_lgs_generator, p="fro",dim=(1,2)),dim=0)
@@ -199,7 +207,12 @@ class HereditaryGeometryDiscovery():
         return loss_span
 
     
-    def evalute_symmetry(self, ps: torch.Tensor, generator:torch.Tensor, track_loss: bool=True)->float:
+    def evalute_symmetry(self, 
+                         ps: torch.Tensor, 
+                         generator:torch.Tensor,
+                         encoder:torch.nn.Module,
+                         decoder:torch.nn.Module, 
+                         track_loss: bool=True)->float:
         """
         Evaluates whether the generator is contained within the kernel distribution of the base task (expressed in the encoder and decoder).
         For stable learning, ensure that encoder and decoder are both identity maps in the beginning.
@@ -214,9 +227,10 @@ class HereditaryGeometryDiscovery():
             return torch.vmap(torch.vmap(torch.func.jacrev(f)))(s)
 
         # Let the generator act on the points in latent space.
-        tilde_ps=self.encoder(ps)
+
+        tilde_ps=encoder(ps)
         gen_tilde_ps = torch.einsum("dnm,bm->bdn", generator, tilde_ps)
-        jac_decoder=compute_vec_jacobian(self.decoder, gen_tilde_ps)
+        jac_decoder=compute_vec_jacobian(decoder, gen_tilde_ps)
         gen_ps = torch.einsum("bdmn, bdn->bdm", jac_decoder, gen_tilde_ps)
 
         # Check symmetry, need to evaluate frame at base points.
@@ -226,11 +240,11 @@ class HereditaryGeometryDiscovery():
         frame_ps=frame_ps.unsqueeze(0)
 
         _, gen_into_frame = self._project_onto_vector_subspace(gen_ps, frame_ps)
-        
+
         loss_symmetry= torch.norm(gen_into_frame, dim=(-1)).sum(-1).mean()
-        loss_reconstruction= torch.norm(ps - self.decoder(self.encoder(ps)), dim=(-1)).mean()
+        loss_reconstruction= torch.norm(ps - decoder(encoder(ps)), dim=(-1)).mean()
         l1_penalty = lambda model: sum(p.abs().sum() for p in model.parameters())
-        loss_reg = self._lasso_coef_encoder_decoder * (l1_penalty(self.encoder) + l1_penalty(self.decoder))
+        loss_reg = self._lasso_coef_encoder_decoder * (l1_penalty(encoder) + l1_penalty(decoder))
 
         if track_loss:
             self._losses["symmetry"].append(loss_symmetry.detach().cpu().numpy())
@@ -292,22 +306,34 @@ class HereditaryGeometryDiscovery():
         ps = self.tasks_ps[self.base_task_index][torch.randint(0, self._n_samples, (self.batch_size,))]
 
         if take_step_geometry:
+
+            # Freeze encoder and decoder.
+            for p in self.encoder.parameters():
+                p.requires_grad = False
+            for p in self.decoder.parameters():
+                p.requires_grad = False
+
             self.optimizer_lgs.zero_grad()
-            loss_left_action = self.evalute_left_actions(ps=ps, log_lgs=self.log_lgs)
+            loss_left_action = self.evalute_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder, decoder=self.decoder)
             loss_left_action.backward()
             self.optimizer_lgs.step()
 
 
         if take_step_symmetry:
+            # Freeze follower optimization variables and unfreeze leader optimization variables.
             frozen_lgs = self.log_lgs.detach().clone()
             frozen_lgs.requires_grad_(False)
+            for p in self.encoder.parameters():
+                p.requires_grad = True
+            for p in self.decoder.parameters():
+                p.requires_grad = True
 
             self.optimizer_generator.zero_grad()
             self.optimizer_encoder.zero_grad()
             self.optimizer_decoder.zero_grad()
 
             loss_span = self.evaluate_generator_span(generator=self.generator, log_lgs=frozen_lgs)
-            loss_symmetry = self.evalute_symmetry(ps=ps, generator=self.generator)
+            loss_symmetry = self.evalute_symmetry(ps=ps, generator=self.generator, encoder=self.encoder, decoder=self.decoder)
             (loss_span + loss_symmetry).backward()            
             self.optimizer_generator.step()
             self.optimizer_encoder.step()
@@ -343,8 +369,6 @@ class HereditaryGeometryDiscovery():
                 time.sleep(0.05)
 
             self._set_progress_bar()
-
-
 
 
     def rotation_vector_field(self, p_batch: torch.tensor, center)->torch.tensor:
@@ -392,7 +416,7 @@ class HereditaryGeometryDiscovery():
             "train/symmetry/reconstruction": float(self._losses['reconstruction'][-1]),
             "train/regularizers/symmetry": float(self._losses['symmetry_reg'][-1]),
             "train/regularizers/left_actions/lasso": float(self._losses['left_actions_tasks_reg'][-1]),
-        })
+        }, step=step)
 
 
     @property
