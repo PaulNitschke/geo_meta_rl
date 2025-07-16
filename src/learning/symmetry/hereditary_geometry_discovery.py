@@ -18,22 +18,22 @@ class HereditaryGeometryDiscovery():
                  tasks_ps: List[torch.tensor],
                  tasks_frameestimators: List[callable],
                  kernel_dim: int,
-                 encoder: callable=None,
-                 decoder: callable=None,
+                 learning_rate_left_actions:float,
+                 update_chart_every_n_steps:int,
+                 learning_rate_generator:float,
+                 learning_rate_encoder:float,
+                 learning_rate_decoder:float,
+                 n_steps_pretrain_geometry:int,
+                 hyper_grad_leader_how: Literal['unrolled', 'implicit', 'blackbox'],
+                 encoder: torch.nn.Module,
+                 decoder: torch.nn.Module,
                  seed:int=42,
                  log_lg_inits_how:Literal['log_linreg', 'random']= 'log_linreg',
                  batch_size:int=64,
                  bandwidth:float=0.5,
 
-                 update_chart_every_n_steps:int=1,
                  lasso_coef_lgs: Optional[float] = 0.5,
                  lasso_coef_encoder_decoder: Optional[float] = 0.005,
-                 learning_rate_left_actions:float=0.0035,
-                 learning_rate_generator:float=0.00035,
-                 learning_rate_encoder:float=0.00035,
-                 learning_rate_decoder:float=0.00035,
-                 n_steps_pretrain_geometrys:int=10_000,
-
                  log_wandb:bool=False,
                  task_specifications:list=None,
                  use_oracle_rotation_kernel:bool=False,
@@ -88,7 +88,8 @@ class HereditaryGeometryDiscovery():
         self._learning_rate_generator=learning_rate_generator
         self._learning_rate_encoder=learning_rate_encoder
         self._learning_rate_decoder=learning_rate_decoder
-        self._n_steps_pretrain_geometrys=n_steps_pretrain_geometrys
+        self._n_steps_pretrain_geometry=n_steps_pretrain_geometry
+        self.hyper_grad_leader_how=hyper_grad_leader_how
 
         self._log_wandb=log_wandb
         self._use_oracle_rotation_kernel=use_oracle_rotation_kernel
@@ -351,12 +352,189 @@ class HereditaryGeometryDiscovery():
         self._set_progress_bar()
 
 
+    def take_step_chart_implicit(self, step_counter: Optional[int] = None,
+                                cg_iters: int = 10, cg_tol: float = 1e-5,
+                                ridge: float = 1e-3):
+        """
+        Implicit‐diff update for chart (encoder & decoder), treating
+        geometry (log_lgs & generator) as the follower at its true optimum.
+        """
+
+        # detach so we treat them as constants in the outer‐solve
+        y_star = {
+            "log_lgs":    self.log_lgs.detach().requires_grad_(True),
+            "generator":  self.generator.detach().requires_grad_(True)
+        }
+
+        # 2) Evaluate direct and ∂L/∂y
+        ps = self.tasks_ps[self.base_task_index][torch.randint(0, self._n_samples, (self.batch_size,))]
+        # outer loss at (x, y*)
+        L_val = (
+            self.evalute_left_actions(ps, y_star["log_lgs"], self.encoder, self.decoder)
+        + self.evalute_symmetry   (ps, y_star["generator"], self.encoder, self.decoder)
+        )
+        # direct term ∂_x L
+        direct_grads = torch.autograd.grad(L_val,
+                                        list(self.encoder.parameters()) +
+                                        list(self.decoder.parameters()),
+                                        retain_graph=True)
+
+        # ∂L/∂y
+        gy = torch.autograd.grad(L_val,
+                                (y_star["log_lgs"], y_star["generator"]),
+                                create_graph=True)
+
+        # 3) Define Hessian‐vector product for follower f(x,y)
+        def hvp(vecs):
+            # compute ∂f/∂y
+            f_val = (
+                self.evalute_left_actions(ps, y_star["log_lgs"], self.encoder, self.decoder)
+            + self.evaluate_generator_span(y_star["generator"], y_star["log_lgs"])
+            + self.evalute_symmetry(ps, y_star["generator"], self.encoder, self.decoder)
+            + 0.5 * ridge * (
+                    y_star["log_lgs"].pow(2).sum() +
+                    y_star["generator"].pow(2).sum()
+                )
+            )
+            grad_fy = torch.autograd.grad(f_val,
+                                        (y_star["log_lgs"], y_star["generator"]),
+                                        create_graph=True)
+            # directional derivative ∂^2 f/∂y^2 @ vecs + ridge·vecs
+            return torch.autograd.grad(grad_fy,
+                                    (y_star["log_lgs"], y_star["generator"]),
+                                    grad_outputs=vecs,
+                                    retain_graph=True)
+
+        # 4) Solve (H + ridge I) · v = gy by CG
+        # initialize v = zero
+        v = [torch.zeros_like(g) for g in gy]
+        r = [g.clone() for g in gy]
+        p_list = [ri.clone() for ri in r]
+        rs_old = sum((ri*ri).sum() for ri in r).item()
+
+        for _ in range(cg_iters):
+            Hp = hvp(p_list)
+            pHp = sum((p*hp).sum() for p,hp in zip(p_list, Hp)).item()
+            alpha = rs_old / (pHp + 1e-12)
+            v = [vi + alpha * pi for vi,pi in zip(v, p_list)]
+            r = [ri - alpha * hpi for ri,hpi in zip(r, Hp)]
+            rs_new = sum((ri*ri).sum() for ri in r).item()
+            if rs_new < cg_tol:
+                break
+            p_list = [ri + (rs_new/rs_old)*pi for ri,pi in zip(r, p_list)]
+            rs_old = rs_new
+
+        # 5) Compute mixed‐derivative term m = ∂_x[∂_y f] @ v
+        # get ∂f/∂y again (with create_graph=True)
+        f_val = (
+            self.evalute_left_actions(ps, y_star["log_lgs"], self.encoder, self.decoder)
+        + self.evaluate_generator_span(y_star["generator"], y_star["log_lgs"])
+        + self.evalute_symmetry(ps, y_star["generator"], self.encoder, self.decoder)
+        + 0.5 * ridge * (
+                y_star["log_lgs"].pow(2).sum() +
+                y_star["generator"].pow(2).sum()
+            )
+        )
+        grad_fy = torch.autograd.grad(f_val,
+                                    (y_star["log_lgs"], y_star["generator"]),
+                                    create_graph=True)
+        m_list = torch.autograd.grad(grad_fy,
+                                    list(self.encoder.parameters()) +
+                                    list(self.decoder.parameters()),
+                                    grad_outputs=v)
+
+        # 6) Combine hypergradient for x: ∂L/∂x − m_list
+        hyper_grads = [dx - m for dx,m in zip(direct_grads, m_list)]
+
+        # 7) Finally apply to encoder+decoder
+        for (p, hg) in zip(self.encoder.parameters(), hyper_grads[:len(self.encoder.parameters())]):
+            p.grad = hg
+        for (p, hg) in zip(self.decoder.parameters(), hyper_grads[len(self.encoder.parameters()):]):
+            p.grad = hg
+
+        self.optimizer_encoder.step()
+        self.optimizer_decoder.step()
+
+        # logging & progress
+        if step_counter is not None and step_counter % 5 == 0:
+            self._log_to_wandb(step_counter)
+            time.sleep(0.05)
+        self._set_progress_bar()
+
+
+
+    def take_step_chart_unrolled(self, step_counter: Optional[int] = None):
+        log_lgs_u = self.log_lgs.clone().detach().requires_grad_(True)
+        gen_u     = self.generator.clone().detach().requires_grad_(True)
+        for p in self.encoder.parameters(): p.requires_grad = False
+        for p in self.decoder.parameters(): p.requires_grad = False
+
+        # 3) Unroll K follower steps with create_graph=True
+        K=50
+        inner_lr_lgs, inner_lr_gen = self._learning_rate_left_actions, self._learning_rate_generator
+        for _ in range(K):   # e.g. K=200
+            # sample a batch
+            ps = self.tasks_ps[self.base_task_index][
+                torch.randint(0, self._n_samples, (self.batch_size,))
+                ]
+            # compute follower loss
+            loss_inner = (
+                self.evalute_left_actions(
+                    ps=ps, log_lgs=log_lgs_u,
+                    encoder=self.encoder, decoder=self.decoder
+                )
+            + self.evaluate_generator_span(
+                    generator=gen_u, log_lgs=log_lgs_u
+                )
+            + self.evalute_symmetry(
+                    ps=ps, generator=gen_u,
+                    encoder=self.encoder, decoder=self.decoder
+                )
+            )
+            # get gradients w.r.t. the *copies*
+            grads = torch.autograd.grad(
+                loss_inner,
+                (log_lgs_u, gen_u),
+                create_graph=True
+            )
+            # take a gradient step on the copies
+            log_lgs_u = log_lgs_u - inner_lr_lgs * grads[0]
+            gen_u     = gen_u     - inner_lr_gen * grads[1]
+
+        # 4) Now compute the *leader* loss using the converged copies
+        for p in self.encoder.parameters(): p.requires_grad = True
+        for p in self.decoder.parameters(): p.requires_grad = True
+
+        loss_left  = self.evalute_left_actions(
+                        ps=ps, log_lgs=log_lgs_u,
+                        encoder=self.encoder, decoder=self.decoder
+                    )
+        loss_sym   = self.evalute_symmetry(
+                        ps=ps, generator=gen_u,
+                        encoder=self.encoder, decoder=self.decoder
+                    )
+        loss_outer = loss_left + loss_sym
+
+        # 5) Backpropagate through the entire unroll
+        self.optimizer_encoder.zero_grad()
+        self.optimizer_decoder.zero_grad()
+        loss_outer.backward()
+        self.optimizer_encoder.step()
+        self.optimizer_decoder.step()
+
+        if step_counter is not None and step_counter % 5 == 0:
+            self._log_to_wandb(step_counter)
+            time.sleep(0.05)
+        self._set_progress_bar()
+
+
+
     def optimize(self, n_steps:int=1000):
         """Main optimization loop."""
         self.progress_bar = tqdm(range(n_steps), desc="Hereditary Symmetry Discovery")
 
         step_counter = 0
-        for _ in range(self._n_steps_pretrain_geometrys):
+        for _ in range(self._n_steps_pretrain_geometry):
             self.take_step_geometry(step_counter=step_counter)
             step_counter += 1
 
@@ -367,12 +545,31 @@ class HereditaryGeometryDiscovery():
                 self.take_step_geometry(step_counter=step_counter)
                 step_counter += 1
 
-            self.take_step_chart(step_counter=step_counter)
+            if self.hyper_grad_leader_how=="unrolled":
+                self.take_step_chart_unrolled(step_counter=step_counter)
+            elif self.hyper_grad_leader_how=="implicit":
+                self.take_step_chart_implicit(step_counter=step_counter)
+            else:
+                self.take_step_chart(step_counter=step_counter)
             step_counter += 1
 
             if step_counter>=n_steps:
                 logging.info("Reached maximum number of steps, stopping optimization.")
                 break
+
+
+    def save(self, path: str):
+        """Saves the model to a file."""
+        torch.save({
+            'log_lgs': self.log_lgs,
+            'generator': self.generator,
+            'encoder_state_dict': self.encoder.state_dict(),
+            'decoder_state_dict': self.decoder.state_dict(),
+            'losses': self._losses,
+            'task_specifications': self.task_specifications,
+            'seed': self.seed
+        }, path)
+        logging.info(f"Model saved to {path}")
 
 
     def rotation_vector_field(self, p_batch: torch.tensor, center)->torch.tensor:
