@@ -7,6 +7,7 @@ from tqdm import tqdm
 import numpy as np
 import torch
 import wandb
+import higher
 
 from ..initialization import identity_init_neural_net, ExponentialLinearRegressor
 
@@ -31,7 +32,7 @@ class HereditaryGeometryDiscovery():
                  learning_rate_generator:float=0.00035,
                  learning_rate_encoder:float=0.00035,
                  learning_rate_decoder:float=0.00035,
-                 n_steps_pretrain_left_actions:int=10_000,
+                 n_steps_pretrain_geometrys:int=10_000,
 
                  log_wandb:bool=False,
                  task_specifications:list=None,
@@ -87,7 +88,7 @@ class HereditaryGeometryDiscovery():
         self._learning_rate_generator=learning_rate_generator
         self._learning_rate_encoder=learning_rate_encoder
         self._learning_rate_decoder=learning_rate_decoder
-        self._n_steps_pretrain_left_actions=n_steps_pretrain_left_actions
+        self._n_steps_pretrain_geometrys=n_steps_pretrain_geometrys
 
         self._log_wandb=log_wandb
         self._use_oracle_rotation_kernel=use_oracle_rotation_kernel
@@ -301,76 +302,75 @@ class HereditaryGeometryDiscovery():
         return proj.squeeze(1), ortho_comp.squeeze(1)
 
         
-    def take_grad_step(self, take_step_geometry:bool=True, take_step_symmetry:bool=True):
-        """Takes one gradient step."""
+    def take_step_geometry(self, step_counter:Optional[int]=None):
+        """Update the geometry variables under a frozen chart."""
         ps = self.tasks_ps[self.base_task_index][torch.randint(0, self._n_samples, (self.batch_size,))]
 
-        if take_step_geometry:
+        for p in self.encoder.parameters(): p.requires_grad = False
+        for p in self.decoder.parameters(): p.requires_grad = False
 
-            # Freeze encoder and decoder.
-            for p in self.encoder.parameters():
-                p.requires_grad = False
-            for p in self.decoder.parameters():
-                p.requires_grad = False
+        self.optimizer_lgs.zero_grad()
+        self.optimizer_generator.zero_grad()
+        
+        loss_left_action = self.evalute_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder, decoder=self.decoder)
+        loss_span = self.evaluate_generator_span(generator=self.generator, log_lgs=self.log_lgs)
+        loss_symmetry = self.evalute_symmetry(ps=ps, generator=self.generator, encoder=self.encoder, decoder=self.decoder)
+        
+        (loss_left_action + loss_span + loss_symmetry).backward()
 
-            self.optimizer_lgs.zero_grad()
-            loss_left_action = self.evalute_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder, decoder=self.decoder)
-            loss_left_action.backward()
-            self.optimizer_lgs.step()
+        self.optimizer_lgs.step()
+        self.optimizer_generator.step()
+
+        if step_counter is not None and step_counter % 5 == 0:
+            self._log_to_wandb(step_counter)
+            time.sleep(0.05)
+        self._set_progress_bar()
 
 
-        if take_step_symmetry:
-            # Freeze follower optimization variables and unfreeze leader optimization variables.
-            frozen_lgs = self.log_lgs.detach().clone()
-            frozen_lgs.requires_grad_(False)
-            for p in self.encoder.parameters():
-                p.requires_grad = True
-            for p in self.decoder.parameters():
-                p.requires_grad = True
+    def take_step_chart(self, step_counter:Optional[int]=None):
+        """Update the chart under frozen geometry variables."""
+        ps = self.tasks_ps[self.base_task_index][torch.randint(0, self._n_samples, (self.batch_size,))]
 
-            self.optimizer_generator.zero_grad()
-            self.optimizer_encoder.zero_grad()
-            self.optimizer_decoder.zero_grad()
+        frozen_log_ps = self.log_lgs.detach().clone().requires_grad_(False)
+        frozen_generator = self.generator.detach().clone().requires_grad_(False)
+        for p in self.encoder.parameters(): p.requires_grad = True
+        for p in self.decoder.parameters(): p.requires_grad = True
 
-            loss_span = self.evaluate_generator_span(generator=self.generator, log_lgs=frozen_lgs)
-            loss_symmetry = self.evalute_symmetry(ps=ps, generator=self.generator, encoder=self.encoder, decoder=self.decoder)
-            (loss_span + loss_symmetry).backward()            
-            self.optimizer_generator.step()
-            self.optimizer_encoder.step()
-            self.optimizer_decoder.step()
+        self.optimizer_encoder.zero_grad()
+        self.optimizer_decoder.zero_grad()
+
+        loss_left_action = self.evalute_left_actions(ps=ps, log_lgs=frozen_log_ps, encoder=self.encoder, decoder=self.decoder)
+        loss_symmetry = self.evalute_symmetry(ps=ps, generator=frozen_generator, encoder=self.encoder, decoder=self.decoder)
+        (loss_symmetry + loss_left_action).backward()            
+        self.optimizer_encoder.step()
+        self.optimizer_decoder.step()
+
+        if step_counter is not None and step_counter % 5 == 0:
+            self._log_to_wandb(step_counter)
+            time.sleep(0.05)
+        self._set_progress_bar()
 
 
     def optimize(self, n_steps:int=1000):
-        """Optimizes the left action."""
-        self.progress_bar = tqdm(range(n_steps), desc="Inferring left-action")
+        """Main optimization loop."""
+        self.progress_bar = tqdm(range(n_steps), desc="Hereditary Symmetry Discovery")
 
         step_counter = 0
-        for _ in range(self._n_steps_pretrain_left_actions):
-            self.take_grad_step(take_step_geometry=True, take_step_symmetry=False)
+        for _ in range(self._n_steps_pretrain_geometrys):
+            self.take_step_geometry(step_counter=step_counter)
             step_counter += 1
-            if step_counter % 5 == 0:
-                self._log_to_wandb(step_counter)
-                time.sleep(0.05)
 
-            self._set_progress_bar()
 
         for _ in self.progress_bar:
+            
             for _ in range(self._update_chart_every_n_steps):
-                self.take_grad_step(take_step_geometry=True, take_step_symmetry=False)
+                self.take_step_geometry(step_counter=step_counter)
                 step_counter += 1
-                if step_counter % 5 == 0:
-                    self._log_to_wandb(step_counter)
-                    time.sleep(0.05)
 
-            self.take_grad_step(take_step_geometry=False, take_step_symmetry=True)
+            self.take_step_chart(step_counter=step_counter)
             step_counter += 1
-            if step_counter % 5 == 0:
-                self._log_to_wandb(step_counter)
-                time.sleep(0.05)
 
-            self._set_progress_bar()
-
-            if step_counter==n_steps:
+            if step_counter>=n_steps:
                 logging.info("Reached maximum number of steps, stopping optimization.")
                 break
 
