@@ -68,8 +68,6 @@ def train(lr_chart, update_chart_every_n_steps, hyper_grad_leader_how):
         "hyper_grad_leader_how": hyper_grad_leader_how,
     }, reinit=True)
 
-    wandb.watch(ENCODER,log="all",log_freq=10)
-    wandb.watch(DECODER,log="all",log_freq=10)
 
     her_geo_dis=HereditaryGeometryDiscovery(tasks_ps=tasks_ps,
                                             tasks_frameestimators=tasks_frameestimators, 
