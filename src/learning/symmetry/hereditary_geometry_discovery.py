@@ -128,28 +128,6 @@ class HereditaryGeometryDiscovery():
         # Optimization variables
         torch.manual_seed(seed)
 
-        if self._learn_left_actions:
-            if self._log_lg_inits_how == 'log_linreg':
-                self._log_lg_inits=self._init_log_lgs_linear_reg(verbose=False, epochs=2500, log_wandb=self._log_wandb)
-
-            elif self._log_lg_inits_how == 'random':
-                self._log_lg_inits = torch.randn(size=(self._n_tasks-1, self.ambient_dim, self.ambient_dim))
-
-            self.log_lgs= torch.nn.Parameter(self._log_lg_inits.clone())
-            self.optimizer_lgs = torch.optim.Adam([self.log_lgs],lr=self._learning_rate_left_actions)
-            assert self.log_lgs.shape == (self._n_tasks-1, self.ambient_dim, self.ambient_dim), "Log left actions must be of shape (N_tasks-1, n, n)."
-        
-
-        self.generator=torch.nn.Parameter(torch.randn(size=(self.kernel_dim, self.ambient_dim, self.ambient_dim))) if self.oracle_generator is None else torch.nn.Parameter(self.oracle_generator.clone())
-        assert self.generator.shape == (self.kernel_dim, self.ambient_dim, self.ambient_dim), "Generator must be of shape (d, n, n)."
-        self.optimizer_generator=torch.optim.Adam([self.generator], lr=self._learning_rate_generator)
-
-
-        self.encoder= identity_init_neural_net(self.encoder, tasks_ps=self.tasks_ps, name="encoder", log_wandb=self._log_wandb)
-        self.decoder= identity_init_neural_net(self.decoder, tasks_ps=self.tasks_ps, name="decoder", log_wandb=self._log_wandb)
-        self.optimizer_encoder=torch.optim.Adam(self.encoder.parameters(), lr=self._learning_rate_encoder)
-        self.optimizer_decoder=torch.optim.Adam(self.decoder.parameters(), lr=self._learning_rate_decoder)
-
     
     def evalute_left_actions(self, 
                              ps: torch.Tensor, 
@@ -201,6 +179,7 @@ class HereditaryGeometryDiscovery():
                                 log_lgs: torch.Tensor, 
                                 track_loss:bool=True)->float:
         """Evalutes whether all left-actions are inside the span of the generator."""
+        #TODO, dont the left-actions have to be frozen here?
         _, ortho_log_lgs_generator=self._project_onto_tensor_subspace(log_lgs, generator)
         loss_span=torch.mean(torch.norm(ortho_log_lgs_generator, p="fro",dim=(1,2)),dim=0)
 
@@ -667,3 +646,27 @@ class HereditaryGeometryDiscovery():
             )
 
         self.progress_bar.set_description(prog_bar_description.strip(" | "))
+
+    def _init_optimization(self):
+        """Initializes the optimization: initializes the left-actions, encoder and decoder and defines the optimizers."""
+        
+        if self._learn_left_actions:
+            if self._log_lg_inits_how == 'log_linreg':
+                self._log_lg_inits=self._init_log_lgs_linear_reg(verbose=False, epochs=2500, log_wandb=self._log_wandb)
+
+            elif self._log_lg_inits_how == 'random':
+                self._log_lg_inits = torch.randn(size=(self._n_tasks-1, self.ambient_dim, self.ambient_dim))
+
+            self.log_lgs= torch.nn.Parameter(self._log_lg_inits.clone())
+            self.optimizer_lgs = torch.optim.Adam([self.log_lgs],lr=self._learning_rate_left_actions)
+            assert self.log_lgs.shape == (self._n_tasks-1, self.ambient_dim, self.ambient_dim), "Log left actions must be of shape (N_tasks-1, n, n)."
+        
+        self.generator=torch.nn.Parameter(torch.randn(size=(self.kernel_dim, self.ambient_dim, self.ambient_dim))) if self.oracle_generator is None else torch.nn.Parameter(self.oracle_generator.clone())
+        assert self.generator.shape == (self.kernel_dim, self.ambient_dim, self.ambient_dim), "Generator must be of shape (d, n, n)."
+        self.optimizer_generator=torch.optim.Adam([self.generator], lr=self._learning_rate_generator)
+
+
+        self.encoder= identity_init_neural_net(self.encoder, tasks_ps=self.tasks_ps, name="encoder", log_wandb=self._log_wandb)
+        self.decoder= identity_init_neural_net(self.decoder, tasks_ps=self.tasks_ps, name="decoder", log_wandb=self._log_wandb)
+        self.optimizer_encoder=torch.optim.Adam(self.encoder.parameters(), lr=self._learning_rate_encoder)
+        self.optimizer_decoder=torch.optim.Adam(self.decoder.parameters(), lr=self._learning_rate_decoder)

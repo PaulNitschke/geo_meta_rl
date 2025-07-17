@@ -1,8 +1,10 @@
-from src.utils import load_replay_buffer_and_kernel
 import wandb
 import torch
 import argparse
+from datetime import datetime
+
 from src.learning.symmetry.hereditary_geometry_discovery import HereditaryGeometryDiscovery
+from src.utils import load_replay_buffer_and_kernel
 from src.utils import Affine2D
 
 def train(lr_chart, update_chart_every_n_steps, hyper_grad_leader_how):
@@ -48,8 +50,8 @@ def train(lr_chart, update_chart_every_n_steps, hyper_grad_leader_how):
     ORACLE_GENERATOR=torch.tensor([[0, -1], [1,0]], dtype=torch.float32, requires_grad=False).unsqueeze(0) if not LEARN_GENERATOR else None
 
     WAND_PROJECT_NAME="circle_hereditary_geometry_discovery"
-
-    wandb.init(project=WAND_PROJECT_NAME, name=f"lr_chart:{lr_chart}_update_n:{update_chart_every_n_steps}_hyper_grad:{hyper_grad_leader_how}",config={
+    run_name:str=datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    wandb.init(project=WAND_PROJECT_NAME, name=run_name,config={
         "n_steps": N_STEPS,
         "batch_size": BATCH_SIZE,
         "kernel_dim": KERNEL_DIM,
@@ -94,6 +96,7 @@ def train(lr_chart, update_chart_every_n_steps, hyper_grad_leader_how):
                                             encoder=ENCODER,
                                             decoder=DECODER)
     her_geo_dis.optimize(n_steps=N_STEPS)
+    her_geo_dis.save(f"data/local/experiment/circle_rotation/{run_name}/hereditary_geometry_discovery.pt")
     wandb.finish()
 
 
