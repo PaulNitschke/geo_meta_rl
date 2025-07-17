@@ -7,7 +7,6 @@ from tqdm import tqdm
 import numpy as np
 import torch
 import wandb
-import higher
 
 from ..initialization import identity_init_neural_net, ExponentialLinearRegressor
 
@@ -175,12 +174,15 @@ class HereditaryGeometryDiscovery():
     
 
     def evaluate_generator_span(self, 
-                                generator: torch.Tensor, 
+                                generator: torch.nn.Module, 
                                 log_lgs: torch.Tensor, 
                                 track_loss:bool=True)->float:
-        """Evalutes whether all left-actions are inside the span of the generator."""
-        #TODO, dont the left-actions have to be frozen here?
-        _, ortho_log_lgs_generator=self._project_onto_tensor_subspace(log_lgs.param, generator.param)
+        """
+        Evalutes whether all left-actions are inside the span of the generator.
+        log_lgs are frozen in this loss function (and hence a detached tensor).
+        """
+
+        _, ortho_log_lgs_generator=self._project_onto_tensor_subspace(log_lgs, generator.param)
         loss_span=torch.mean(torch.norm(ortho_log_lgs_generator, p="fro",dim=(1,2)),dim=0)
 
         if track_loss:
@@ -295,8 +297,9 @@ class HereditaryGeometryDiscovery():
         self.optimizer_generator.zero_grad()
         
         loss_left_action = self.evalute_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder, decoder=self.decoder)
-        loss_span = self.evaluate_generator_span(generator=self.generator, log_lgs=self.log_lgs)
         loss_symmetry = self.evalute_symmetry(ps=ps, generator=self.generator, encoder=self.encoder, decoder=self.decoder)
+        log_lgs_detach_tensor = self.log_lgs.param.detach()
+        loss_span = self.evaluate_generator_span(generator=self.generator, log_lgs=log_lgs_detach_tensor)
         
         (loss_left_action + loss_span + loss_symmetry).backward()
 
@@ -674,7 +677,7 @@ class HereditaryGeometryDiscovery():
 
         if self._learn_left_actions:
             if self._log_lg_inits_how == 'log_linreg':
-                self._log_lg_inits=self._init_log_lgs_linear_reg(verbose=False, log_wandb=self._log_wandb)
+                self._log_lg_inits=self._init_log_lgs_linear_reg(verbose=False, log_wandb=self._log_wandb, epochs=2_500)
 
             elif self._log_lg_inits_how == 'random':
                 self._log_lg_inits = torch.randn(size=(self._n_tasks-1, self.ambient_dim, self.ambient_dim))

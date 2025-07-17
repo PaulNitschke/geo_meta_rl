@@ -67,7 +67,7 @@ def train(lr_chart, update_chart_every_n_steps, hyper_grad_leader_how):
         "update_chart_every_n_steps": update_chart_every_n_steps,
         "n_steps_pretrain_geometry": N_STEPS_PRETRAIN_GEOMETRY,
         "hyper_grad_leader_how": hyper_grad_leader_how,
-    }, finish_previous=True)
+    })
 
     her_geo_dis=HereditaryGeometryDiscovery(tasks_ps=tasks_ps,
                                             tasks_frameestimators=tasks_frameestimators, 
