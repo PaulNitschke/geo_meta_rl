@@ -4,8 +4,7 @@ import argparse
 from datetime import datetime
 
 from src.learning.symmetry.hereditary_geometry_discovery import HereditaryGeometryDiscovery
-from src.utils import load_replay_buffer_and_kernel
-from src.utils import Affine2D
+from src.utils import load_replay_buffer_and_kernel, Affine2D
 
 def train(lr_chart, update_chart_every_n_steps, hyper_grad_leader_how):
     """Trains hereditary symmetry discovery on circle where we change the learning rate for the chart and the update frequency of the chart."""
@@ -68,10 +67,7 @@ def train(lr_chart, update_chart_every_n_steps, hyper_grad_leader_how):
         "update_chart_every_n_steps": update_chart_every_n_steps,
         "n_steps_pretrain_geometry": N_STEPS_PRETRAIN_GEOMETRY,
         "hyper_grad_leader_how": hyper_grad_leader_how,
-    }, reinit=True)
-
-    wandb.watch(ENCODER,log="all",log_freq=10)
-    wandb.watch(DECODER,log="all",log_freq=10)
+    }, finish_previous=True)
 
     her_geo_dis=HereditaryGeometryDiscovery(tasks_ps=tasks_ps,
                                             tasks_frameestimators=tasks_frameestimators, 

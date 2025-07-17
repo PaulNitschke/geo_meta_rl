@@ -127,7 +127,7 @@ class HereditaryGeometryDiscovery():
 
         # Optimization variables
         torch.manual_seed(seed)
-
+        self._init_optimization()
     
     def evalute_left_actions(self, 
                              ps: torch.Tensor, 
@@ -138,7 +138,7 @@ class HereditaryGeometryDiscovery():
         """Computes kernel alignment loss of all left-actions."""
         # 1. Push-forward
         tilde_ps=encoder(ps)
-        lgs=torch.linalg.matrix_exp(log_lgs)
+        lgs=torch.linalg.matrix_exp(log_lgs.param)
         lg_tilde_ps = torch.einsum("Nmn,bn->Nbm", lgs, tilde_ps)
         lg_ps = decoder(lg_tilde_ps)
 
@@ -164,7 +164,7 @@ class HereditaryGeometryDiscovery():
         _, ortho_lgs_frame_ps = self._project_onto_vector_subspace(lgs_frame_ps, frames_i_lg_ps)
         mean_ortho_comp = lambda vec: torch.norm(vec, dim=(-1)).mean(-1).mean(-1)
         self.task_losses = mean_ortho_comp(ortho_frame_i_lg_ps) + mean_ortho_comp(ortho_lgs_frame_ps)
-        self.task_losses_reg = self._lasso_coef_lgs*torch.norm(log_lgs, p=1, dim=(-1)).mean(-1).mean(-1)
+        self.task_losses_reg = self._lasso_coef_lgs*torch.norm(log_lgs.param, p=1, dim=(-1)).mean(-1).mean(-1)
 
         if track_loss:
             self._losses["left_actions_tasks"].append(self.task_losses.detach().cpu().numpy())
@@ -180,7 +180,7 @@ class HereditaryGeometryDiscovery():
                                 track_loss:bool=True)->float:
         """Evalutes whether all left-actions are inside the span of the generator."""
         #TODO, dont the left-actions have to be frozen here?
-        _, ortho_log_lgs_generator=self._project_onto_tensor_subspace(log_lgs, generator)
+        _, ortho_log_lgs_generator=self._project_onto_tensor_subspace(log_lgs.param, generator.param)
         loss_span=torch.mean(torch.norm(ortho_log_lgs_generator, p="fro",dim=(1,2)),dim=0)
 
         if track_loss:
@@ -210,7 +210,7 @@ class HereditaryGeometryDiscovery():
         # Let the generator act on the points in latent space.
 
         tilde_ps=encoder(ps)
-        gen_tilde_ps = torch.einsum("dnm,bm->bdn", generator, tilde_ps)
+        gen_tilde_ps = torch.einsum("dnm,bm->bdn", generator.param, tilde_ps)
         jac_decoder=compute_vec_jacobian(decoder, gen_tilde_ps)
         gen_ps = torch.einsum("bdmn, bdn->bdm", jac_decoder, gen_tilde_ps)
 
@@ -286,6 +286,8 @@ class HereditaryGeometryDiscovery():
         """Update the geometry variables under a frozen chart."""
         ps = self.tasks_ps[self.base_task_index][torch.randint(0, self._n_samples, (self.batch_size,))]
 
+        for p in self.log_lgs.parameters(): p.requires_grad = True
+        for p in self.generator.parameters(): p.requires_grad = True
         for p in self.encoder.parameters(): p.requires_grad = False
         for p in self.decoder.parameters(): p.requires_grad = False
 
@@ -311,16 +313,16 @@ class HereditaryGeometryDiscovery():
         """Update the chart under frozen geometry variables."""
         ps = self.tasks_ps[self.base_task_index][torch.randint(0, self._n_samples, (self.batch_size,))]
 
-        frozen_log_ps = self.log_lgs.detach().clone().requires_grad_(False)
-        frozen_generator = self.generator.detach().clone().requires_grad_(False)
+        for p in self.log_lgs.parameters(): p.requires_grad = False
+        for p in self.generator.parameters(): p.requires_grad = False
         for p in self.encoder.parameters(): p.requires_grad = True
         for p in self.decoder.parameters(): p.requires_grad = True
 
         self.optimizer_encoder.zero_grad()
         self.optimizer_decoder.zero_grad()
 
-        loss_left_action = self.evalute_left_actions(ps=ps, log_lgs=frozen_log_ps, encoder=self.encoder, decoder=self.decoder)
-        loss_symmetry = self.evalute_symmetry(ps=ps, generator=frozen_generator, encoder=self.encoder, decoder=self.decoder)
+        loss_left_action = self.evalute_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder, decoder=self.decoder)
+        loss_symmetry = self.evalute_symmetry(ps=ps, generator=self.generator, encoder=self.encoder, decoder=self.decoder)
         (loss_symmetry + loss_left_action).backward()            
         self.optimizer_encoder.step()
         self.optimizer_decoder.step()
@@ -341,8 +343,8 @@ class HereditaryGeometryDiscovery():
 
         # detach so we treat them as constants in the outer‐solve
         y_star = {
-            "log_lgs":    self.log_lgs.detach().requires_grad_(True),
-            "generator":  self.generator.detach().requires_grad_(True)
+            "log_lgs":    self.log_lgs.param.detach().requires_grad_(True),
+            "generator":  self.generator.param.detach().requires_grad_(True)
         }
 
         # 2) Evaluate direct and ∂L/∂y
@@ -441,10 +443,9 @@ class HereditaryGeometryDiscovery():
         self._set_progress_bar()
 
 
-
     def take_step_chart_unrolled(self, step_counter: Optional[int] = None):
-        log_lgs_u = self.log_lgs.clone().detach().requires_grad_(True)
-        gen_u     = self.generator.clone().detach().requires_grad_(True)
+        log_lgs_u = self.log_lgs.param.clone().detach().requires_grad_(True)
+        gen_u     = self.generator.param.clone().detach().requires_grad_(True)
         for p in self.encoder.parameters(): p.requires_grad = False
         for p in self.decoder.parameters(): p.requires_grad = False
 
@@ -507,7 +508,6 @@ class HereditaryGeometryDiscovery():
         self._set_progress_bar()
 
 
-
     def optimize(self, n_steps:int=1000):
         """Main optimization loop."""
         self.progress_bar = tqdm(range(n_steps), desc="Hereditary Symmetry Discovery")
@@ -540,8 +540,8 @@ class HereditaryGeometryDiscovery():
     def save(self, path: str):
         """Saves the model to a file."""
         torch.save({
-            'log_lgs': self.log_lgs,
-            'generator': self.generator,
+            'log_lgs': self.log_lgs.param,
+            'generator': self.generator.param,
             'encoder_state_dict': self.encoder.state_dict(),
             'decoder_state_dict': self.decoder.state_dict(),
             'losses': self._losses,
@@ -587,8 +587,14 @@ class HereditaryGeometryDiscovery():
         """Logs losses to weights and biases."""
         if not self._log_wandb:
             return
+        
+        def _log_grad_norms(module: torch.nn.Module, prefix: str):
+            """Logs L2 norms of gradients of a PyTorch module to wandb."""
+            for name, param in module.named_parameters():
+                if param.grad is not None:
+                    metrics[f"grad_norms/{prefix}/{name}"] = param.grad.norm().item()
 
-        wandb.log({
+        metrics= {
             "train/left_actions/mean": float(self._losses['left_actions'][-1]),
             # "train/left_actions/tasks": float(self._losses['left_actions_tasks'][-1]), #TODO, log task level losses.
             "train/generator": float(self._losses['generator'][-1]),
@@ -596,12 +602,19 @@ class HereditaryGeometryDiscovery():
             "train/symmetry/reconstruction": float(self._losses['reconstruction'][-1]),
             "train/regularizers/symmetry": float(self._losses['symmetry_reg'][-1]),
             "train/regularizers/left_actions/lasso": float(self._losses['left_actions_tasks_reg'][-1]),
-        }, step=step)
+        }
+
+        _log_grad_norms(self.encoder, "encoder")
+        _log_grad_norms(self.decoder, "decoder")
+        _log_grad_norms(self.log_lgs, "log_lgs")
+        _log_grad_norms(self.generator, "generator")
+
+        wandb.log(metrics, step=step)
 
 
     @property
     def lgs(self):
-        return torch.linalg.matrix_exp(self.log_lgs)
+        return torch.linalg.matrix_exp(self.log_lgs.param)
     
 
     @property
@@ -647,23 +660,33 @@ class HereditaryGeometryDiscovery():
 
         self.progress_bar.set_description(prog_bar_description.strip(" | "))
 
+
     def _init_optimization(self):
         """Initializes the optimization: initializes the left-actions, encoder and decoder and defines the optimizers."""
-        
+
+
+        class TensorToModule(torch.nn.Module):
+            def __init__(self, tensor):
+                """Converts a tensor to a PyTorch module for easier gradient tracking. Used for the log-left actions and the generator."""
+                super().__init__()
+                self.param=torch.nn.Parameter(tensor)
+
+
         if self._learn_left_actions:
             if self._log_lg_inits_how == 'log_linreg':
-                self._log_lg_inits=self._init_log_lgs_linear_reg(verbose=False, epochs=2500, log_wandb=self._log_wandb)
+                self._log_lg_inits=self._init_log_lgs_linear_reg(verbose=False, log_wandb=self._log_wandb)
 
             elif self._log_lg_inits_how == 'random':
                 self._log_lg_inits = torch.randn(size=(self._n_tasks-1, self.ambient_dim, self.ambient_dim))
 
-            self.log_lgs= torch.nn.Parameter(self._log_lg_inits.clone())
-            self.optimizer_lgs = torch.optim.Adam([self.log_lgs],lr=self._learning_rate_left_actions)
-            assert self.log_lgs.shape == (self._n_tasks-1, self.ambient_dim, self.ambient_dim), "Log left actions must be of shape (N_tasks-1, n, n)."
+            # self.log_lgs= torch.nn.Parameter(self._log_lg_inits.clone())
+            self.log_lgs=TensorToModule(self._log_lg_inits.clone())
+            self.optimizer_lgs = torch.optim.Adam(self.log_lgs.parameters(),lr=self._learning_rate_left_actions)
         
-        self.generator=torch.nn.Parameter(torch.randn(size=(self.kernel_dim, self.ambient_dim, self.ambient_dim))) if self.oracle_generator is None else torch.nn.Parameter(self.oracle_generator.clone())
-        assert self.generator.shape == (self.kernel_dim, self.ambient_dim, self.ambient_dim), "Generator must be of shape (d, n, n)."
-        self.optimizer_generator=torch.optim.Adam([self.generator], lr=self._learning_rate_generator)
+        _generator=torch.randn(size=(self.kernel_dim, self.ambient_dim, self.ambient_dim)) if self.oracle_generator is None else self.oracle_generator.clone()
+        assert _generator.shape == (self.kernel_dim, self.ambient_dim, self.ambient_dim), "Generator must be of shape (d, n, n)."
+        self.generator= TensorToModule(_generator)
+        self.optimizer_generator=torch.optim.Adam(self.generator.parameters(), lr=self._learning_rate_generator)
 
 
         self.encoder= identity_init_neural_net(self.encoder, tasks_ps=self.tasks_ps, name="encoder", log_wandb=self._log_wandb)
