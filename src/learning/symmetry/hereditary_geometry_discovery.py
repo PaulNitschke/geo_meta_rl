@@ -121,7 +121,7 @@ class HereditaryGeometryDiscovery():
         self._losses["left_actions_tasks_reg"]= [torch.tensor([0])]
 
         self._losses["generator"]= [torch.tensor([0])]
-        self._losses["generator_reg"] [torch.tensor([0])]
+        self._losses["generator_reg"] = [torch.tensor([0])]
         
         self._losses["symmetry"]= [torch.tensor([0])]
         self._losses["reconstruction"]= [torch.tensor([0])]
