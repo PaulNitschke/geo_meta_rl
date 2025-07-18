@@ -39,8 +39,8 @@ def train(lr_chart, update_chart_every_n_steps, hyper_grad_leader_how):
     N_STEPS=250_000
     BATCH_SIZE=128
     BANDWIDTH=None
-    LEARNING_RATE_LEFT_ACTIONS=0.00035
-    LEARNING_RATE_GENERATOR=0.00035
+    lr_LEFT_ACTIONS=0.00035
+    lr_GENERATOR=0.00035
     N_STEPS_PRETRAIN_GEOMETRY=10_000
 
 
@@ -60,10 +60,10 @@ def train(lr_chart, update_chart_every_n_steps, hyper_grad_leader_how):
         "learn_generator": LEARN_GENERATOR,
         "seed": SEED,
         "use_oracle_rotation_kernel": USE_ORACLE_ROTATION_KERNEL,
-        "learning_rate_left_actions": LEARNING_RATE_LEFT_ACTIONS,
-        "learning_rate_generator": LEARNING_RATE_GENERATOR,
-        "learning_rate_encoder": lr_chart,
-        "learning_rate_decoder": lr_chart,
+        "lr_left_actions": lr_LEFT_ACTIONS,
+        "lr_generator": lr_GENERATOR,
+        "lr_encoder": lr_chart,
+        "lr_decoder": lr_chart,
         "update_chart_every_n_steps": update_chart_every_n_steps,
         "n_steps_pretrain_geometry": N_STEPS_PRETRAIN_GEOMETRY,
         "hyper_grad_leader_how": hyper_grad_leader_how,
@@ -79,13 +79,11 @@ def train(lr_chart, update_chart_every_n_steps, hyper_grad_leader_how):
                                             learn_encoder_decoder=LEARN_ENCODER_DECODER,
                                             use_oracle_rotation_kernel=USE_ORACLE_ROTATION_KERNEL,
                                             task_specifications=train_goal_locations,
-                                            learn_left_actions=LEARN_LEFT_ACTIONS,
-                                            learn_generator=LEARN_GENERATOR,
                                             oracle_generator=ORACLE_GENERATOR,
-                                            learning_rate_left_actions=LEARNING_RATE_LEFT_ACTIONS,
-                                            learning_rate_generator=LEARNING_RATE_GENERATOR,
-                                            learning_rate_encoder=lr_chart,
-                                            learning_rate_decoder=lr_chart,
+                                            lr_left_actions=lr_LEFT_ACTIONS,
+                                            lr_generator=lr_GENERATOR,
+                                            lr_encoder=lr_chart,
+                                            lr_decoder=lr_chart,
                                             hyper_grad_leader_how=hyper_grad_leader_how,
                                             update_chart_every_n_steps=update_chart_every_n_steps,
                                             n_steps_pretrain_geometry=N_STEPS_PRETRAIN_GEOMETRY,
