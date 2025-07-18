@@ -33,6 +33,7 @@ class HereditaryGeometryDiscovery():
 
                  lasso_coef_lgs: Optional[float] = 0.5,
                  lasso_coef_encoder_decoder: Optional[float] = 0.005,
+                 lasso_coef_generator: Optional[float] = 0.005,
                  log_wandb:bool=False,
                  task_specifications:list=None,
                  use_oracle_rotation_kernel:bool=False,
@@ -83,6 +84,7 @@ class HereditaryGeometryDiscovery():
         self._update_chart_every_n_steps=update_chart_every_n_steps
         self._lasso_coef_lgs=lasso_coef_lgs if lasso_coef_lgs is not None else 0.0
         self._lasso_coef_encoder_decoder=lasso_coef_encoder_decoder if lasso_coef_encoder_decoder is not None else 0.0
+        self._lasso_coef_generator = lasso_coef_generator
         self._learning_rate_left_actions=learning_rate_left_actions
         self._learning_rate_generator=learning_rate_generator
         self._learning_rate_encoder=learning_rate_encoder
@@ -119,6 +121,7 @@ class HereditaryGeometryDiscovery():
         self._losses["left_actions_tasks_reg"]= [torch.tensor([0])]
 
         self._losses["generator"]= [torch.tensor([0])]
+        self._losses["generator_reg"] [torch.tensor([0])]
         
         self._losses["symmetry"]= [torch.tensor([0])]
         self._losses["reconstruction"]= [torch.tensor([0])]
@@ -184,10 +187,12 @@ class HereditaryGeometryDiscovery():
 
         _, ortho_log_lgs_generator=self._project_onto_tensor_subspace(log_lgs, generator.param)
         loss_span=torch.mean(torch.norm(ortho_log_lgs_generator, p="fro",dim=(1,2)),dim=0)
+        loss_reg=self._lasso_coef_generator*self._l1_penalty(generator)
 
         if track_loss:
             self._losses["generator"].append(loss_span.detach().cpu().numpy())
-        return loss_span
+            self._losses["generator_reg"].append(loss_reg.detach().cpu().numpy())
+        return loss_span+loss_reg
 
     
     def evalute_symmetry(self, 
@@ -226,8 +231,7 @@ class HereditaryGeometryDiscovery():
 
         loss_symmetry= torch.norm(gen_into_frame, dim=(-1)).sum(-1).mean()
         loss_reconstruction= torch.norm(ps - decoder(encoder(ps)), dim=(-1)).mean()
-        l1_penalty = lambda model: sum(p.abs().sum() for p in model.parameters())
-        loss_reg = self._lasso_coef_encoder_decoder * (l1_penalty(encoder) + l1_penalty(decoder))
+        loss_reg = self._lasso_coef_encoder_decoder * (self._l1_penalty(encoder) + self._l1_penalty(decoder))
 
         if track_loss:
             self._losses["symmetry"].append(loss_symmetry.detach().cpu().numpy())
@@ -235,6 +239,11 @@ class HereditaryGeometryDiscovery():
             self._losses["symmetry_reg"].append(loss_reg.detach().cpu().numpy())
 
         return loss_symmetry+loss_reconstruction+loss_reg
+    
+
+    def _l1_penalty(self, model):
+        """L1 Penalty on model parameters."""
+        return sum(p.abs().sum() for p in model.parameters())
         
 
     def _project_onto_vector_subspace(self, vecs, basis):
@@ -605,6 +614,7 @@ class HereditaryGeometryDiscovery():
             "train/symmetry/reconstruction": float(self._losses['reconstruction'][-1]),
             "train/regularizers/symmetry": float(self._losses['symmetry_reg'][-1]),
             "train/regularizers/left_actions/lasso": float(self._losses['left_actions_tasks_reg'][-1]),
+            "train/regularizers/generator/lasso": float(self._losses['generator_reg'][-1]),
         }
 
         _log_grad_norms(self.encoder, "encoder")
