@@ -275,9 +275,8 @@ class HereditaryGeometryDiscovery():
         """
         b,n,_= tensors.shape
         d,_,_= basis.shape
-        basis_normed= basis/torch.norm(basis, p='fro', dim=(-1, -2), keepdim=True)
         tensors_flat=tensors.reshape(b, n*n)
-        basis_flat=basis_normed.reshape(d, n*n)
+        basis_flat=basis.reshape(d, n*n)
 
 
         proj_vecs_flat, ortho_vecs_flat = self._project_onto_vector_subspace(tensors_flat, basis_flat)
@@ -301,6 +300,7 @@ class HereditaryGeometryDiscovery():
         for p in self.encoder.parameters(): p.requires_grad = False
         for p in self.decoder.parameters(): p.requires_grad = False
 
+        self.optimizer_lgs.zero_grad()
         self.optimizer_generator.zero_grad()
         
         loss_left_action = self.evalute_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder, decoder=self.decoder)
@@ -316,8 +316,6 @@ class HereditaryGeometryDiscovery():
         if step_counter is not None and step_counter % 5 == 0:
             self._log_to_wandb(step_counter)
             time.sleep(0.05)
-        if self._verbose:
-            self._set_progress_bar()
 
 
     def take_step_chart(self, step_counter:Optional[int]=None):
@@ -341,8 +339,6 @@ class HereditaryGeometryDiscovery():
         if step_counter is not None and step_counter % 5 == 0:
             self._log_to_wandb(step_counter)
             time.sleep(0.05)
-        if self._verbose:
-            self._set_progress_bar()
 
 
     def take_step_chart_implicit(self, step_counter: Optional[int] = None,
@@ -452,7 +448,6 @@ class HereditaryGeometryDiscovery():
         if step_counter is not None and step_counter % 5 == 0:
             self._log_to_wandb(step_counter)
             time.sleep(0.05)
-        self._set_progress_bar()
 
 
     def take_step_chart_unrolled(self, step_counter: Optional[int] = None):
@@ -517,7 +512,6 @@ class HereditaryGeometryDiscovery():
         if step_counter is not None and step_counter % 5 == 0:
             self._log_to_wandb(step_counter)
             time.sleep(0.05)
-        self._set_progress_bar()
 
 
     def optimize(self, n_steps:int=1000):
@@ -649,29 +643,6 @@ class HereditaryGeometryDiscovery():
             "reconstruction": np.array(self._losses["reconstruction"][1:]),
             "symmetry_reg": np.array(self._losses["symmetry_reg"][1:]),
         }
-    
-
-    def _set_progress_bar(self):
-        """Updates the progress bar with the current losses."""
-        prog_bar_description = ""
-
-        prog_bar_description += (
-            f"Left-Action Loss: {round(self._losses['left_actions'][-1].item(), 3)} | "
-            f"Task Losses: {np.round(self._losses['left_actions_tasks'][-1], 3)} | "
-            f"Task Losses (reg): {np.round(self._losses['left_actions_tasks_reg'][-1], 3)} | "
-        )
-
-        prog_bar_description += (
-            f"Generator Span Loss: {round(self._losses['generator'][-1].item(), 3)} | "
-        )
-
-        if self._learn_encoder_decoder:
-            prog_bar_description += (
-                f"Symmetry Loss: {round(self._losses['symmetry'][-1].item(), 3)} | "
-                f"Reconstruction Loss: {round(self._losses['reconstruction'][-1].item(), 3)} | "
-            )
-
-        self.progress_bar.set_description(prog_bar_description.strip(" | "))
 
 
     def _init_optimization(self):
@@ -683,6 +654,7 @@ class HereditaryGeometryDiscovery():
                 """Converts a tensor to a PyTorch module for easier gradient tracking. Used for the log-left actions and the generator."""
                 super().__init__()
                 self.param=torch.nn.Parameter(tensor)
+                torch.nn.utils.parametrizations.weight_norm(self, name='param', dim=0)
 
 
         if self._log_lg_inits_how == 'log_linreg':
