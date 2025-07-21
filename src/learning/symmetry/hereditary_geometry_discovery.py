@@ -275,8 +275,10 @@ class HereditaryGeometryDiscovery():
         """
         b,n,_= tensors.shape
         d,_,_= basis.shape
+        basis_normed= basis/torch.norm(basis, p='fro', dim=(-1, -2), keepdim=True)
         tensors_flat=tensors.reshape(b, n*n)
-        basis_flat=basis.reshape(d, n*n)
+        basis_flat=basis_normed.reshape(d, n*n)
+
 
         proj_vecs_flat, ortho_vecs_flat = self._project_onto_vector_subspace(tensors_flat, basis_flat)
         proj = proj_vecs_flat.reshape(b, n, n)
@@ -285,22 +287,9 @@ class HereditaryGeometryDiscovery():
         with torch.no_grad():
             s = torch.linalg.svdvals(basis_flat)
             self._diagnostics["cond_num_generator"].append((s.max()/s.min()).item())
-            self._diagnostics["frob_norm_generator"].append(torch.mean(torch.norm(basis_flat, p='fro', dim=(-1, -2))).item()) #TODO, this is incorrect, need to average over the lie group dimension.
+            self._diagnostics["frob_norm_generator"].append(torch.mean(torch.norm(basis_flat, p='fro', dim=(-1, -2))).item())
 
         return proj, ortho_comp
-        # G = torch.einsum('dij,eij->de', basis, basis)
-        # Ginv = torch.linalg.pinv(G)            
-
-        # coeff = torch.einsum('...ij,dij->...d', tensors, basis)
-        # coeff = coeff @ Ginv
-
-        # with torch.no_grad():
-        #     s = torch.linalg.svdvals(G)
-        #     self._diagnostics["cond_num_generator"].append((s.max()/s.min()).item())
-
-        # proj  = torch.einsum('...d,dij->...ij', coeff, basis)
-        # ortho = tensors - proj
-        # return proj, ortho
     
         
     def take_step_geometry(self, step_counter:Optional[int]=None):
@@ -312,7 +301,6 @@ class HereditaryGeometryDiscovery():
         for p in self.encoder.parameters(): p.requires_grad = False
         for p in self.decoder.parameters(): p.requires_grad = False
 
-        self.optimizer_lgs.zero_grad()
         self.optimizer_generator.zero_grad()
         
         loss_left_action = self.evalute_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder, decoder=self.decoder)
