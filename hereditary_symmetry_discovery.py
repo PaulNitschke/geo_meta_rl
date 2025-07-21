@@ -1,10 +1,12 @@
+import os
+from datetime import datetime
+import argparse
+
 import wandb
 import torch
-import argparse
-from datetime import datetime
 
-from src.learning.symmetry.hereditary_geometry_discovery import HereditaryGeometryDiscovery
 from src.utils import load_replay_buffer_and_kernel, Affine2D
+from src.learning.symmetry.hereditary_geometry_discovery import HereditaryGeometryDiscovery
 
 def train(lr_chart, update_chart_every_n_steps, hyper_grad_leader_how):
     """Trains hereditary symmetry discovery on circle where we change the learning rate for the chart and the update frequency of the chart."""
@@ -36,12 +38,12 @@ def train(lr_chart, update_chart_every_n_steps, hyper_grad_leader_how):
     LEARN_GENERATOR=True
     LEARN_ENCODER_DECODER=True
     USE_ORACLE_ROTATION_KERNEL=True
-    N_STEPS=250_000
+    N_STEPS=1
     BATCH_SIZE=128
     BANDWIDTH=None
     lr_LEFT_ACTIONS=0.00035
     lr_GENERATOR=0.00035
-    N_STEPS_PRETRAIN_GEOMETRY=10_000
+    N_STEPS_PRETRAIN_GEOMETRY=1
 
 
     ENCODER=Affine2D(input_dim=2, output_dim=2)
@@ -90,6 +92,7 @@ def train(lr_chart, update_chart_every_n_steps, hyper_grad_leader_how):
                                             encoder=ENCODER,
                                             decoder=DECODER)
     her_geo_dis.optimize(n_steps=N_STEPS)
+    os.mkdir(f"data/local/experiment/circle_rotation/{run_name}")
     her_geo_dis.save(f"data/local/experiment/circle_rotation/{run_name}/hereditary_geometry_discovery.pt")
     wandb.finish()
 

@@ -285,7 +285,7 @@ class HereditaryGeometryDiscovery():
         with torch.no_grad():
             s = torch.linalg.svdvals(basis_flat)
             self._diagnostics["cond_num_generator"].append((s.max()/s.min()).item())
-            self._diagnostics["frob_norm_generator"].append(torch.norm(basis_flat, p='fro').item())
+            self._diagnostics["frob_norm_generator"].append(torch.mean(torch.norm(basis_flat, p='fro', dim=(-1, -2))).item()) #TODO, this is incorrect, need to average over the lie group dimension.
 
         return proj, ortho_comp
         # G = torch.einsum('dij,eij->de', basis, basis)
@@ -628,6 +628,7 @@ class HereditaryGeometryDiscovery():
             "train/regularizers/generator/lasso": float(self._losses['generator_reg'][-1]),
 
             "diagnostics/cond_num_generator": float(self._diagnostics['cond_num_generator'][-1]),
+            "diagnostics/frob_norm_generator": float(self._diagnostics['frob_norm_generator'][-1]),
         }
 
         _log_grad_norms(self.encoder, "encoder")
