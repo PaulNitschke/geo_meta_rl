@@ -39,6 +39,7 @@ class HereditaryGeometryDiscovery():
                  use_oracle_rotation_kernel:bool=False,
                  oracle_generator: torch.tensor=None,
                  learn_encoder_decoder:bool=False,
+                 verbose:bool=False
                 ):
         """Hereditary Geometry Discovery.
         This class implements hereditary symmetry discovery.
@@ -94,6 +95,7 @@ class HereditaryGeometryDiscovery():
         self.task_specifications=task_specifications
         self.oracle_generator= oracle_generator
         self._learn_encoder_decoder=learn_encoder_decoder
+        self._verbose=verbose
 
         self._validate_inputs()
 
@@ -108,7 +110,7 @@ class HereditaryGeometryDiscovery():
         self.frame_base_task= self.tasks_frameestimators[self.base_task_index]
         self.frame_i_tasks= [self.tasks_frameestimators[i] for i in self.task_idxs]
 
-        self._losses={}
+        self._losses, self._diagnostics={}, {}
         self._losses["left_actions"]= [torch.tensor([0])]
         self._losses["left_actions_tasks"]= [torch.tensor([0])]
         self._losses["left_actions_tasks_reg"]= [torch.tensor([0])]
@@ -119,6 +121,8 @@ class HereditaryGeometryDiscovery():
         self._losses["symmetry"]= [torch.tensor([0])]
         self._losses["reconstruction"]= [torch.tensor([0])]
         self._losses["symmetry_reg"] = [torch.tensor([0])]
+
+        self._diagnostics["cond_num_generator"] = [torch.tensor([0])]
 
         # Optimization variables
         torch.manual_seed(seed)
@@ -241,11 +245,12 @@ class HereditaryGeometryDiscovery():
 
     def _project_onto_vector_subspace(self, vecs, basis):
         """
-        Projects 1-tensors onto a d-dimensional subspace of 1-tensors.#TODO update docstring to extra batch dimension.
+        Projects 1-tensors onto a d-dimensional subspace of 1-tensors.
         vecs: tensor of shape (N, b, d, n)
         basis: tensor of shape (N, b, d, n)
         Returns:
         - proj_vecs: tensor of shape (N, b, d, n)
+        - ortho_vecs: tensor of shape (N, b, d, n)
         """
         basis_t = basis.transpose(-2, -1)
         G = torch.matmul(basis, basis_t)
@@ -253,38 +258,70 @@ class HereditaryGeometryDiscovery():
         P = torch.matmul(basis_t, torch.matmul(G_inv, basis))
         proj_vecs = torch.matmul(vecs, P)
         return proj_vecs, vecs-proj_vecs
+    
 
-
-    def _project_onto_tensor_subspace(self, tensors: torch.tensor, basis: torch.tensor) -> Tuple[torch.tensor, torch.tensor]:
+    def _project_onto_tensor_subspace(self, tensors: torch.tensor, basis:torch.tensor) -> Tuple[torch.tensor, torch.tensor]:
         """
         Projects 2-tensors onto a d-dimensional subspace of 2-tensors.
         Args:
-        - tensors: torch.tensor of shape (b,n,n), b two-tensors
-        - basis: torch.tensor of shape (d,n,n), a d-dimensional vector space of two-tensors, given by its basis.
+        - tensors: torch.tensor of shape (b, n, n), b two-tensors
+        - basis: torch.tensor of shape (d, n, n), a d-dimensional vector space of two-tensors, given by its basis.
 
         Returns: 
-        - proj: torch.tensor of shape (b,n,n), the projection of tensors onto the subspace spanned by basis
-        - ortho_comp: torch.tensor of shape (b,n,n), the orthogonal complement of tensors with respect to the subspace spanned by basis.
+        - proj: torch.tensor of shape (b, n, n), the projection of tensors onto the subspace spanned by basis
+        - ortho_comp: torch.tensor of shape (b, n, n), the orthogonal complement of tensors with respect to the subspace spanned by basis.
         """
-        tensors= tensors.unsqueeze(1)
-        basis=basis.unsqueeze(0)
-        b, d, _, _ = basis.shape
+        basis=basis/basis.norm(p="fro", dim=(-1, -2), keepdim=True)
 
-        G = torch.einsum('bdij,bdij->bd', basis, basis)
-        G = G.unsqueeze(-1).expand(-1, -1, d)
-        G = G * torch.eye(d, device=basis.device).unsqueeze(0) + torch.einsum('bdi,bdi->bdi', basis.view(b, d, -1), basis.view(b, d, -1)).transpose(1,2)
+        G   = torch.einsum('dij,eij->de', basis, basis)
+        Ginv = torch.linalg.pinv(G)    
 
-        G = torch.matmul(basis.view(b, d, -1), basis.view(b, d, -1).transpose(1, 2))
-        G_inv = torch.linalg.pinv(G)
+        coeff = torch.einsum('...ij,dij->...d', tensors, basis)
+        coeff = coeff @ Ginv
 
-        v = tensors.expand(-1, d, -1, -1)
-        b_proj = torch.einsum('bdij,bdij->bd', v, basis)
+        with torch.no_grad():
+            s = torch.linalg.svdvals(G)
+            self._diagnostics["cond_num_generator"].append((s.max()/s.min()).item())
 
-        alpha = torch.matmul(G_inv, b_proj.unsqueeze(-1)).squeeze(-1)
-        proj = torch.sum(alpha.unsqueeze(-1).unsqueeze(-1) * basis, dim=1, keepdim=True)
-        ortho_comp=tensors-proj
-        return proj.squeeze(1), ortho_comp.squeeze(1)
+        proj  = torch.einsum('...d,dij->...ij', coeff, basis)
+        ortho = tensors - proj
+        return proj, ortho
+    
 
+    #TODO: need to fix project_onto_tensor_subspace for 2-tensors.
+
+
+    # def _project_onto_tensor_subspace(self, tensors: torch.tensor, basis: torch.tensor) -> Tuple[torch.tensor, torch.tensor]:
+    #     """
+    #     Projects 2-tensors onto a d-dimensional subspace of 2-tensors.
+    #     Args:
+    #     - tensors: torch.tensor of shape (b,n,n), b two-tensors
+    #     - basis: torch.tensor of shape (d,n,n), a d-dimensional vector space of two-tensors, given by its basis.
+
+    #     Returns: 
+    #     - proj: torch.tensor of shape (b,n,n), the projection of tensors onto the subspace spanned by basis
+    #     - ortho_comp: torch.tensor of shape (b,n,n), the orthogonal complement of tensors with respect to the subspace spanned by basis.
+    #     """
+    #     tensors= tensors.unsqueeze(1)
+    #     basis=basis.unsqueeze(0)
+    #     b, d, _, _ = basis.shape
+
+    #     G = torch.einsum('bdij,bdij->bd', basis, basis)
+    #     G = G.unsqueeze(-1).expand(-1, -1, d)
+    #     G = G * torch.eye(d, device=basis.device).unsqueeze(0) + torch.einsum('bdi,bdi->bdi', basis.view(b, d, -1), basis.view(b, d, -1)).transpose(1,2)
+
+    #     G = torch.matmul(basis.view(b, d, -1), basis.view(b, d, -1).transpose(1, 2))
+    #     self._diagnostics["cond_num_generator"].append(torch.linalg.cond(G).mean(-1).item())
+    #     G_inv = torch.linalg.pinv(G)
+
+    #     v = tensors.expand(-1, d, -1, -1)
+    #     b_proj = torch.einsum('bdij,bdij->bd', v, basis)
+
+    #     alpha = torch.matmul(G_inv, b_proj.unsqueeze(-1)).squeeze(-1)
+    #     proj = torch.sum(alpha.unsqueeze(-1).unsqueeze(-1) * basis, dim=1, keepdim=True)
+    #     ortho_comp=tensors-proj
+    #     return proj.squeeze(1), ortho_comp.squeeze(1)
+    
         
     def take_step_geometry(self, step_counter:Optional[int]=None):
         """Update the geometry variables under a frozen chart."""
@@ -311,7 +348,8 @@ class HereditaryGeometryDiscovery():
         if step_counter is not None and step_counter % 5 == 0:
             self._log_to_wandb(step_counter)
             time.sleep(0.05)
-        self._set_progress_bar()
+        if self._verbose:
+            self._set_progress_bar()
 
 
     def take_step_chart(self, step_counter:Optional[int]=None):
@@ -335,7 +373,8 @@ class HereditaryGeometryDiscovery():
         if step_counter is not None and step_counter % 5 == 0:
             self._log_to_wandb(step_counter)
             time.sleep(0.05)
-        self._set_progress_bar()
+        if self._verbose:
+            self._set_progress_bar()
 
 
     def take_step_chart_implicit(self, step_counter: Optional[int] = None,
@@ -607,6 +646,8 @@ class HereditaryGeometryDiscovery():
             "train/regularizers/symmetry": float(self._losses['symmetry_reg'][-1]),
             "train/regularizers/left_actions/lasso": float(self._losses['left_actions_tasks_reg'][-1]),
             "train/regularizers/generator/lasso": float(self._losses['generator_reg'][-1]),
+
+            "diagnostics/cond_num_generator": float(self._diagnostics['cond_num_generator'][-1]),
         }
 
         _log_grad_norms(self.encoder, "encoder")
@@ -676,20 +717,27 @@ class HereditaryGeometryDiscovery():
 
 
         if self._log_lg_inits_how == 'log_linreg':
-            self._log_lg_inits=self._init_log_lgs_linear_reg(verbose=False, log_wandb=self._log_wandb, epochs=2_500)
+            self._log_lg_inits=self._init_log_lgs_linear_reg(verbose=False, log_wandb=self._log_wandb, 
+                                                             epochs=2_500,
+                                                            #  epochs=1
+                                                             )
 
         elif self._log_lg_inits_how == 'random':
             self._log_lg_inits = torch.randn(size=(self._n_tasks-1, self.ambient_dim, self.ambient_dim))
         self.log_lgs=TensorToModule(self._log_lg_inits.clone())
         self.optimizer_lgs = torch.optim.Adam(self.log_lgs.parameters(),lr=self._lr_left_actions)
         
-        _generator=torch.randn(size=(self.kernel_dim, self.ambient_dim, self.ambient_dim)) if self.oracle_generator is None else self.oracle_generator.clone()
+        _generator=torch.eye(size=(self.kernel_dim, self.ambient_dim, self.ambient_dim)) if self.oracle_generator is None else self.oracle_generator.clone()
         assert _generator.shape == (self.kernel_dim, self.ambient_dim, self.ambient_dim), "Generator must be of shape (d, n, n)."
         self.generator= TensorToModule(_generator)
         self.optimizer_generator=torch.optim.Adam(self.generator.parameters(), lr=self._lr_generator)
 
 
-        self.encoder= identity_init_neural_net(self.encoder, tasks_ps=self.tasks_ps, name="encoder", log_wandb=self._log_wandb)
-        self.decoder= identity_init_neural_net(self.decoder, tasks_ps=self.tasks_ps, name="decoder", log_wandb=self._log_wandb)
+        self.encoder= identity_init_neural_net(self.encoder, tasks_ps=self.tasks_ps, name="encoder", log_wandb=self._log_wandb, 
+                                            #    n_steps=1
+                                               )
+        self.decoder= identity_init_neural_net(self.decoder, tasks_ps=self.tasks_ps, name="decoder", log_wandb=self._log_wandb,
+                                            #    n_steps=1
+                                               )
         self.optimizer_encoder=torch.optim.Adam(self.encoder.parameters(), lr=self._lr_encoder)
         self.optimizer_decoder=torch.optim.Adam(self.decoder.parameters(), lr=self._lr_decoder)
