@@ -38,7 +38,7 @@ def train(lr_chart, update_chart_every_n_steps, hyper_grad_leader_how):
     LEARN_GENERATOR=True
     LEARN_ENCODER_DECODER=True
     USE_ORACLE_ROTATION_KERNEL=True
-    N_STEPS=100_000
+    N_STEPS=1_000_000
     BATCH_SIZE=128
     BANDWIDTH=None
     lr_LEFT_ACTIONS=0.00035
