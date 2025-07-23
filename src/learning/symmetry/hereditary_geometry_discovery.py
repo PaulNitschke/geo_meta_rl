@@ -456,16 +456,15 @@ class HereditaryGeometryDiscovery():
         _log_grad_norms(self.log_lgs, "log_lgs")
         _log_grad_norms(self.generator, "generator")
 
-        lgs=self.lgs
-        for idx_lg in range(self._n_tasks-1):
-            table = wandb.Table(dataframe=_convert_tensor_to_dataframe(lgs[idx_lg]))
-            wandb.log({f"left_actions/task={idx_lg}": table})
+        # lgs=self.lgs
+        # for idx_lg in range(self._n_tasks-1):
+        #     table = wandb.Table(dataframe=_convert_tensor_to_dataframe(lgs[idx_lg]))
+        #     wandb.log({f"left_actions/task={idx_lg}": table})
 
-        for idx_lie_group in range(self.kernel_dim):
-            table = wandb.Table(dataframe=_convert_tensor_to_dataframe(self.generator.param[idx_lie_group]))
-            wandb.log({f"generator/Lie_dim={idx_lie_group}": table})
-
-        wandb.log(metrics, step=step)
+        # for idx_lie_group in range(self.kernel_dim):
+        #     table = wandb.Table(dataframe=_convert_tensor_to_dataframe(self.generator.param[idx_lie_group]))
+        #     wandb.log({f"generator/Lie_dim={idx_lie_group}": table})
+        wandb.log(metrics)
 
 
     @property
