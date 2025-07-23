@@ -1,10 +1,12 @@
+import os
+from datetime import datetime
+import argparse
+
 import wandb
 import torch
-import argparse
-from datetime import datetime
 
-from src.learning.symmetry.hereditary_geometry_discovery import HereditaryGeometryDiscovery
 from src.utils import load_replay_buffer_and_kernel, Affine2D
+from src.learning.symmetry.hereditary_geometry_discovery import HereditaryGeometryDiscovery
 
 def train(lr_chart, update_chart_every_n_steps, hyper_grad_leader_how):
     """Trains hereditary symmetry discovery on circle where we change the learning rate for the chart and the update frequency of the chart."""
@@ -27,21 +29,21 @@ def train(lr_chart, update_chart_every_n_steps, hyper_grad_leader_how):
 
     train_goal_locations=[
         {'goal': torch.tensor([-0.70506063,  0.70914702])},
-    {'goal': torch.tensor([ 0.95243384, -0.30474544])},
-    {'goal': torch.tensor([-0.11289421, -0.99360701])},
-    {'goal': torch.tensor([-0.81394263, -0.58094525])}]
+        {'goal': torch.tensor([ 0.95243384, -0.30474544])},
+        {'goal': torch.tensor([-0.11289421, -0.99360701])},
+        {'goal': torch.tensor([-0.81394263, -0.58094525])}]
 
     SEED=42
     LEARN_LEFT_ACTIONS=True
     LEARN_GENERATOR=True
     LEARN_ENCODER_DECODER=True
     USE_ORACLE_ROTATION_KERNEL=True
-    N_STEPS=250_000
+    N_STEPS=500_000
     BATCH_SIZE=128
     BANDWIDTH=None
-    LEARNING_RATE_LEFT_ACTIONS=0.00035
-    LEARNING_RATE_GENERATOR=0.00035
-    N_STEPS_PRETRAIN_GEOMETRY=10_000
+    lr_LEFT_ACTIONS=0.00035
+    lr_GENERATOR=0.00035
+    N_STEPS_PRETRAIN_GEOMETRY=10000
 
 
     ENCODER=Affine2D(input_dim=2, output_dim=2)
@@ -60,10 +62,10 @@ def train(lr_chart, update_chart_every_n_steps, hyper_grad_leader_how):
         "learn_generator": LEARN_GENERATOR,
         "seed": SEED,
         "use_oracle_rotation_kernel": USE_ORACLE_ROTATION_KERNEL,
-        "learning_rate_left_actions": LEARNING_RATE_LEFT_ACTIONS,
-        "learning_rate_generator": LEARNING_RATE_GENERATOR,
-        "learning_rate_encoder": lr_chart,
-        "learning_rate_decoder": lr_chart,
+        "lr_left_actions": lr_LEFT_ACTIONS,
+        "lr_generator": lr_GENERATOR,
+        "lr_encoder": lr_chart,
+        "lr_decoder": lr_chart,
         "update_chart_every_n_steps": update_chart_every_n_steps,
         "n_steps_pretrain_geometry": N_STEPS_PRETRAIN_GEOMETRY,
         "hyper_grad_leader_how": hyper_grad_leader_how,
@@ -79,19 +81,18 @@ def train(lr_chart, update_chart_every_n_steps, hyper_grad_leader_how):
                                             learn_encoder_decoder=LEARN_ENCODER_DECODER,
                                             use_oracle_rotation_kernel=USE_ORACLE_ROTATION_KERNEL,
                                             task_specifications=train_goal_locations,
-                                            learn_left_actions=LEARN_LEFT_ACTIONS,
-                                            learn_generator=LEARN_GENERATOR,
                                             oracle_generator=ORACLE_GENERATOR,
-                                            learning_rate_left_actions=LEARNING_RATE_LEFT_ACTIONS,
-                                            learning_rate_generator=LEARNING_RATE_GENERATOR,
-                                            learning_rate_encoder=lr_chart,
-                                            learning_rate_decoder=lr_chart,
+                                            lr_left_actions=lr_LEFT_ACTIONS,
+                                            lr_generator=lr_GENERATOR,
+                                            lr_encoder=lr_chart,
+                                            lr_decoder=lr_chart,
                                             hyper_grad_leader_how=hyper_grad_leader_how,
                                             update_chart_every_n_steps=update_chart_every_n_steps,
                                             n_steps_pretrain_geometry=N_STEPS_PRETRAIN_GEOMETRY,
                                             encoder=ENCODER,
                                             decoder=DECODER)
     her_geo_dis.optimize(n_steps=N_STEPS)
+    os.mkdir(f"data/local/experiment/circle_rotation/{run_name}")
     her_geo_dis.save(f"data/local/experiment/circle_rotation/{run_name}/hereditary_geometry_discovery.pt")
     wandb.finish()
 
