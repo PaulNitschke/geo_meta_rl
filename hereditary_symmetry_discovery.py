@@ -29,16 +29,16 @@ def train(lr_chart, update_chart_every_n_steps, hyper_grad_leader_how):
 
     train_goal_locations=[
         {'goal': torch.tensor([-0.70506063,  0.70914702])},
-    {'goal': torch.tensor([ 0.95243384, -0.30474544])},
-    {'goal': torch.tensor([-0.11289421, -0.99360701])},
-    {'goal': torch.tensor([-0.81394263, -0.58094525])}]
+        {'goal': torch.tensor([ 0.95243384, -0.30474544])},
+        {'goal': torch.tensor([-0.11289421, -0.99360701])},
+        {'goal': torch.tensor([-0.81394263, -0.58094525])}]
 
     SEED=42
     LEARN_LEFT_ACTIONS=True
     LEARN_GENERATOR=True
     LEARN_ENCODER_DECODER=True
     USE_ORACLE_ROTATION_KERNEL=True
-    N_STEPS=1_000_000
+    N_STEPS=500_000
     BATCH_SIZE=128
     BANDWIDTH=None
     lr_LEFT_ACTIONS=0.00035

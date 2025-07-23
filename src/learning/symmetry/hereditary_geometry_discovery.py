@@ -7,6 +7,7 @@ from tqdm import tqdm
 import numpy as np
 import torch
 import wandb
+import pandas as pd
 
 from ..initialization import identity_init_neural_net, ExponentialLinearRegressor
 
@@ -183,9 +184,9 @@ class HereditaryGeometryDiscovery():
         Evalutes whether all left-actions are inside the span of the generator.
         log_lgs are frozen in this loss function (and hence a detached tensor).
         """
-        _, ortho_log_lgs_generator=self._project_onto_tensor_subspace(log_lgs, generator.param)
-        loss_span=torch.mean(torch.norm(ortho_log_lgs_generator, p="fro",dim=(1,2)),dim=0)
-        loss_reg=self._lasso_coef_generator*self._l1_penalty(generator)
+        _, ortho_log_lgs_generator=self._project_onto_tensor_subspace(log_lgs, generator)
+        loss_span=torch.mean(torch.linalg.matrix_norm(ortho_log_lgs_generator),dim=0)
+        loss_reg=self._lasso_coef_generator*torch.sum(torch.abs(generator))
 
         if track_loss:
             self._losses["generator"].append(loss_span.detach().cpu().numpy())
@@ -214,7 +215,7 @@ class HereditaryGeometryDiscovery():
 
         # Let the generator act on the points in latent space.
         tilde_ps=encoder(ps)
-        gen_tilde_ps = torch.einsum("dnm,bm->bdn", generator.param, tilde_ps)
+        gen_tilde_ps = torch.einsum("dnm,bm->bdn", generator, tilde_ps)
         jac_decoder=compute_vec_jacobian(decoder, gen_tilde_ps)
         gen_ps = torch.einsum("bdmn, bdn->bdm", jac_decoder, gen_tilde_ps)
 
@@ -226,8 +227,8 @@ class HereditaryGeometryDiscovery():
 
         _, gen_into_frame = self._project_onto_vector_subspace(gen_ps, frame_ps)
 
-        loss_symmetry= torch.norm(gen_into_frame, dim=(-1)).sum(-1).mean()
-        loss_reconstruction= torch.norm(ps - decoder(encoder(ps)), dim=(-1)).mean()
+        loss_symmetry= torch.linalg.vector_norm(gen_into_frame, dim=-1).mean(-1).mean()
+        loss_reconstruction= torch.linalg.vector_norm(ps - decoder(encoder(ps)), dim=-1).mean()
         loss_reg = self._lasso_coef_encoder_decoder * (self._l1_penalty(encoder) + self._l1_penalty(decoder))
 
         if track_loss:
@@ -284,7 +285,7 @@ class HereditaryGeometryDiscovery():
         with torch.no_grad():
             s = torch.linalg.svdvals(basis_flat)
             self._diagnostics["cond_num_generator"].append((s.max()/s.min()).item())
-            self._diagnostics["frob_norm_generator"].append(torch.mean(torch.norm(basis_flat, p='fro', dim=(-1, -2))).item())
+            self._diagnostics["frob_norm_generator"].append(torch.mean(torch.linalg.matrix_norm(basis)).item())
 
         return proj, ortho_comp
     
@@ -301,10 +302,12 @@ class HereditaryGeometryDiscovery():
         self.optimizer_lgs.zero_grad()
         self.optimizer_generator.zero_grad()
         
-        loss_left_action = self.evalute_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder, decoder=self.decoder)
-        loss_symmetry = self.evalute_symmetry(ps=ps, generator=self.generator, encoder=self.encoder, decoder=self.decoder)
         log_lgs_detach_tensor = self.log_lgs.param.detach()
-        loss_span = self.evaluate_generator_span(generator=self.generator, log_lgs=log_lgs_detach_tensor)
+        generator_normed = self.generator.param / torch.linalg.matrix_norm(self.generator.param)
+
+        loss_left_action = self.evalute_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder, decoder=self.decoder)
+        loss_span = self.evaluate_generator_span(generator=generator_normed, log_lgs=log_lgs_detach_tensor)
+        loss_symmetry = self.evalute_symmetry(ps=ps, generator=generator_normed, encoder=self.encoder, decoder=self.decoder)
         
         (loss_left_action + loss_span + loss_symmetry).backward()
 
@@ -329,8 +332,8 @@ class HereditaryGeometryDiscovery():
         self.optimizer_decoder.zero_grad()
 
         loss_left_action = self.evalute_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder, decoder=self.decoder)
-        loss_symmetry = self.evalute_symmetry(ps=ps, generator=self.generator, encoder=self.encoder, decoder=self.decoder)
-        (loss_symmetry + loss_left_action).backward()            
+        loss_symmetry = self.evalute_symmetry(ps=ps, generator=self.generator.param, encoder=self.encoder, decoder=self.decoder)
+        (loss_left_action + loss_symmetry).backward()            
         self.optimizer_encoder.step()
         self.optimizer_decoder.step()
 
@@ -362,7 +365,6 @@ class HereditaryGeometryDiscovery():
             else:
                 self.take_step_chart(step_counter=step_counter)
             step_counter += 1
-
             if step_counter>=n_steps:
                 logging.info("Reached maximum number of steps, stopping optimization.")
                 break
@@ -424,6 +426,17 @@ class HereditaryGeometryDiscovery():
                 if param.grad is not None:
                     metrics[f"grad_norms/{prefix}/{name}"] = param.grad.norm().item()
 
+
+        def _convert_tensor_to_dataframe(tensor: torch.tensor) -> pd.DataFrame:
+            """Converts a tensor to a pandas dataframe for wandb logging."""
+            assert tensor.ndim == 2, "Tensor must be 2-dimensional."
+            return pd.DataFrame(
+                tensor.cpu().detach().numpy(),
+                columns=[f"col_{i}" for i in range(tensor.shape[1])],
+                index=[f"row_{i}" for i in range(tensor.shape[0])]
+            )
+        
+
         metrics= {
             "train/left_actions/mean": float(self._losses['left_actions'][-1]),
             # "train/left_actions/tasks": float(self._losses['left_actions_tasks'][-1]), #TODO, log task level losses.
@@ -442,6 +455,15 @@ class HereditaryGeometryDiscovery():
         _log_grad_norms(self.decoder, "decoder")
         _log_grad_norms(self.log_lgs, "log_lgs")
         _log_grad_norms(self.generator, "generator")
+
+        lgs=self.lgs
+        for idx_lg in range(self._n_tasks-1):
+            table = wandb.Table(dataframe=_convert_tensor_to_dataframe(lgs[idx_lg]))
+            wandb.log({f"left_actions/task={idx_lg}": table})
+
+        for idx_lie_group in range(self.kernel_dim):
+            table = wandb.Table(dataframe=_convert_tensor_to_dataframe(self.generator.param[idx_lie_group]))
+            wandb.log({f"generator/Lie_dim={idx_lie_group}": table})
 
         wandb.log(metrics, step=step)
 
@@ -495,7 +517,7 @@ class HereditaryGeometryDiscovery():
         
         _generator=torch.stack([torch.eye(self.ambient_dim) for _ in range(self.kernel_dim)]) if self.oracle_generator is None else self.oracle_generator.clone()
         # _generator=torch.randn(size=(self.kernel_dim, self.ambient_dim, self.ambient_dim)) if self.oracle_generator is None else self.oracle_generator.clone()
-        assert _generator.shape == (self.kernel_dim, self.ambient_dim, self.ambient_dim), "Generator must be of shape (d, n, n)."
+        assert _generator.shape == (self.kernel_dim, self.ambient_dim, self.ambient_dim), "Generator must be of shape (d, n, n)." #TODO, this should rather be called Lie group dimension.
         self.generator= TensorToModule(_generator)
         self.optimizer_generator=torch.optim.Adam(self.generator.parameters(), lr=self._lr_generator)
 
