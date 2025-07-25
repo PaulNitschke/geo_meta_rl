@@ -40,7 +40,9 @@ class HereditaryGeometryDiscovery():
                  use_oracle_rotation_kernel:bool=False,
                  oracle_generator: torch.tensor=None,
                  learn_encoder_decoder:bool=False,
-                 verbose:bool=False
+                 verbose:bool=False,
+                 save_every:int=100,
+                 save_dir:str=None
                 ):
         """Hereditary Geometry Discovery.
         This class implements hereditary symmetry discovery.
@@ -97,6 +99,8 @@ class HereditaryGeometryDiscovery():
         self.oracle_generator= oracle_generator
         self._learn_encoder_decoder=learn_encoder_decoder
         self._verbose=verbose
+        self._save_every= save_every
+        self._save_dir=save_dir
 
         self._validate_inputs()
 
@@ -309,7 +313,9 @@ class HereditaryGeometryDiscovery():
         loss_span = self.evaluate_generator_span(generator=generator_normed, log_lgs=log_lgs_detach_tensor)
         loss_symmetry = self.evalute_symmetry(ps=ps, generator=generator_normed, encoder=self.encoder, decoder=self.decoder)
         
-        (loss_left_action + loss_span + loss_symmetry).backward()
+        (loss_left_action + loss_span + loss_symmetry).backward() 
+        # TODO, backprop the loss_left_action first as it is independent of the other
+        # losses to free up memory.
 
         self.optimizer_lgs.step()
         self.optimizer_generator.step()
@@ -352,7 +358,7 @@ class HereditaryGeometryDiscovery():
             step_counter += 1
 
 
-        for _ in self.progress_bar:
+        for idx in self.progress_bar:
             
             for _ in range(self._update_chart_every_n_steps):
                 self.take_step_geometry(step_counter=step_counter)
@@ -368,6 +374,10 @@ class HereditaryGeometryDiscovery():
             if step_counter>=n_steps:
                 logging.info("Reached maximum number of steps, stopping optimization.")
                 break
+
+            if idx%self._save_every == 0:
+                self.save(f"{self._save_dir}/step_{idx}/hereditary_geometry_discovery.pt")
+                logging.info(f"Saved model at step {idx}.")
 
 
     def save(self, path: str):
