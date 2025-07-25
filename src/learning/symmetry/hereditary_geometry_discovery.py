@@ -375,9 +375,9 @@ class HereditaryGeometryDiscovery():
                 logging.info("Reached maximum number of steps, stopping optimization.")
                 break
 
-            if idx%self._save_every == 0:
-                self.save(f"{self._save_dir}/step_{idx}/hereditary_geometry_discovery.pt")
-                logging.info(f"Saved model at step {idx}.")
+            # if idx%self._save_every == 0:
+            #     self.save(f"{self._save_dir}/step_{idx}/hereditary_geometry_discovery.pt")
+            #     logging.info(f"Saved model at step {idx}.")
 
 
     def save(self, path: str):
