@@ -117,19 +117,19 @@ class HereditaryGeometryDiscovery():
         self.frame_i_tasks= [self.tasks_frameestimators[i] for i in self.task_idxs]
 
         self._losses, self._diagnostics={}, {}
-        self._losses["left_actions"]= [torch.tensor([0])]
-        self._losses["left_actions_tasks"]= [torch.tensor([0])]
-        self._losses["left_actions_tasks_reg"]= [torch.tensor([0])]
+        self._losses["left_actions"]= [[0.0]]
+        self._losses["left_actions_tasks"]= [[0.0]]
+        self._losses["left_actions_tasks_reg"]= [[0.0]]
 
-        self._losses["generator"]= [torch.tensor([0])]
-        self._losses["generator_reg"] = [torch.tensor([0])]
+        self._losses["generator"]= [[0.0]]
+        self._losses["generator_reg"] = [[0.0]]
         
-        self._losses["symmetry"]= [torch.tensor([0])]
-        self._losses["reconstruction"]= [torch.tensor([0])]
-        self._losses["symmetry_reg"] = [torch.tensor([0])]
+        self._losses["symmetry"]= [[0.0]]
+        self._losses["reconstruction"]= [[0.0]]
+        self._losses["symmetry_reg"] = [[0.0]]
 
-        self._diagnostics["cond_num_generator"] = [torch.tensor([0])]
-        self._diagnostics["frob_norm_generator"] = [torch.tensor([0])]
+        self._diagnostics["cond_num_generator"] = [[0.0]]
+        self._diagnostics["frob_norm_generator"] = [[0.0]]
         
 
         # Optimization variables
@@ -390,6 +390,7 @@ class HereditaryGeometryDiscovery():
         torch.save({
             'log_lgs': self.log_lgs.param,
             'generator': self.generator.param,
+            'lgs': self.lgs,
             'encoder_state_dict': self.encoder.state_dict(),
             'decoder_state_dict': self.decoder.state_dict(),
             'losses': self._losses,
@@ -454,7 +455,6 @@ class HereditaryGeometryDiscovery():
 
         metrics= {
             "train/left_actions/mean": float(self._losses['left_actions'][-1]),
-            # "train/left_actions/tasks": float(self._losses['left_actions_tasks'][-1]), #TODO, log task level losses.
             "train/generator": float(self._losses['generator'][-1]),
             "train/symmetry/span": float(self._losses['symmetry'][-1]),
             "train/symmetry/reconstruction": float(self._losses['reconstruction'][-1]),
