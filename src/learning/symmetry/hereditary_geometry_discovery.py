@@ -306,18 +306,18 @@ class HereditaryGeometryDiscovery():
         self.optimizer_lgs.zero_grad()
         self.optimizer_generator.zero_grad()
         
+        loss_left_action = self.evalute_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder, decoder=self.decoder)
+        loss_left_action.backward()
+
+        self.optimizer_lgs.step()
+
         log_lgs_detach_tensor = self.log_lgs.param.detach()
         generator_normed = self.generator.param / torch.linalg.matrix_norm(self.generator.param)
 
-        loss_left_action = self.evalute_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder, decoder=self.decoder)
         loss_span = self.evaluate_generator_span(generator=generator_normed, log_lgs=log_lgs_detach_tensor)
         loss_symmetry = self.evalute_symmetry(ps=ps, generator=generator_normed, encoder=self.encoder, decoder=self.decoder)
         
-        (loss_left_action + loss_span + loss_symmetry).backward() 
-        # TODO, backprop the loss_left_action first as it is independent of the other
-        # losses to free up memory.
-
-        self.optimizer_lgs.step()
+        (loss_span + loss_symmetry).backward() 
         self.optimizer_generator.step()
 
         if step_counter is not None and step_counter % 5 == 0:
