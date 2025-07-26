@@ -1,5 +1,6 @@
 import warnings
 import time
+import os
 import logging
 from typing import Literal, List, Tuple, Optional
 
@@ -116,26 +117,26 @@ class HereditaryGeometryDiscovery():
         self.frame_i_tasks= [self.tasks_frameestimators[i] for i in self.task_idxs]
 
         self._losses, self._diagnostics={}, {}
-        self._losses["left_actions"]= [torch.tensor([0])]
-        self._losses["left_actions_tasks"]= [torch.tensor([0])]
-        self._losses["left_actions_tasks_reg"]= [torch.tensor([0])]
+        self._losses["left_actions"]= [[0.0]]
+        self._losses["left_actions_tasks"]= [[0.0]]
+        self._losses["left_actions_tasks_reg"]= [[0.0]]
 
-        self._losses["generator"]= [torch.tensor([0])]
-        self._losses["generator_reg"] = [torch.tensor([0])]
+        self._losses["generator"]= [[0.0]]
+        self._losses["generator_reg"] = [[0.0]]
         
-        self._losses["symmetry"]= [torch.tensor([0])]
-        self._losses["reconstruction"]= [torch.tensor([0])]
-        self._losses["symmetry_reg"] = [torch.tensor([0])]
+        self._losses["symmetry"]= [[0.0]]
+        self._losses["reconstruction"]= [[0.0]]
+        self._losses["symmetry_reg"] = [[0.0]]
 
-        self._diagnostics["cond_num_generator"] = [torch.tensor([0])]
-        self._diagnostics["frob_norm_generator"] = [torch.tensor([0])]
+        self._diagnostics["cond_num_generator"] = [[0.0]]
+        self._diagnostics["frob_norm_generator"] = [[0.0]]
         
 
         # Optimization variables
         torch.manual_seed(seed)
         self._init_optimization()
     
-    def evalute_left_actions(self, 
+    def evaluate_left_actions(self, 
                              ps: torch.Tensor, 
                              log_lgs: torch.Tensor, 
                              encoder: torch.nn.Module,
@@ -143,8 +144,8 @@ class HereditaryGeometryDiscovery():
                              track_loss:bool=True) -> float:
         """Computes kernel alignment loss of all left-actions."""
         # 1. Push-forward
-        tilde_ps=encoder(ps)
         lgs=torch.linalg.matrix_exp(log_lgs.param)
+        tilde_ps=encoder(ps)
         lg_tilde_ps = torch.einsum("Nmn,bn->Nbm", lgs, tilde_ps)
         lg_ps = decoder(lg_tilde_ps)
 
@@ -306,18 +307,18 @@ class HereditaryGeometryDiscovery():
         self.optimizer_lgs.zero_grad()
         self.optimizer_generator.zero_grad()
         
+        loss_left_action = self.evaluate_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder, decoder=self.decoder)
+        loss_left_action.backward()
+
+        self.optimizer_lgs.step()
+
         log_lgs_detach_tensor = self.log_lgs.param.detach()
         generator_normed = self.generator.param / torch.linalg.matrix_norm(self.generator.param)
 
-        loss_left_action = self.evalute_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder, decoder=self.decoder)
         loss_span = self.evaluate_generator_span(generator=generator_normed, log_lgs=log_lgs_detach_tensor)
         loss_symmetry = self.evalute_symmetry(ps=ps, generator=generator_normed, encoder=self.encoder, decoder=self.decoder)
         
-        (loss_left_action + loss_span + loss_symmetry).backward() 
-        # TODO, backprop the loss_left_action first as it is independent of the other
-        # losses to free up memory.
-
-        self.optimizer_lgs.step()
+        (loss_span + loss_symmetry).backward() 
         self.optimizer_generator.step()
 
         if step_counter is not None and step_counter % 5 == 0:
@@ -337,9 +338,10 @@ class HereditaryGeometryDiscovery():
         self.optimizer_encoder.zero_grad()
         self.optimizer_decoder.zero_grad()
 
-        loss_left_action = self.evalute_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder, decoder=self.decoder)
+        # loss_left_action = self.evaluate_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder, decoder=self.decoder)
         loss_symmetry = self.evalute_symmetry(ps=ps, generator=self.generator.param, encoder=self.encoder, decoder=self.decoder)
-        (loss_left_action + loss_symmetry).backward()            
+        # (loss_left_action + loss_symmetry).backward()
+        loss_symmetry.backward()            
         self.optimizer_encoder.step()
         self.optimizer_decoder.step()
 
@@ -353,16 +355,18 @@ class HereditaryGeometryDiscovery():
         self.progress_bar = tqdm(range(n_steps), desc="Hereditary Symmetry Discovery")
 
         step_counter = 0
-        for _ in range(self._n_steps_pretrain_geometry):
-            self.take_step_geometry(step_counter=step_counter)
-            step_counter += 1
+        if self.oracle_generator is None:
+            for _ in range(self._n_steps_pretrain_geometry):
+                self.take_step_geometry(step_counter=step_counter)
+                step_counter += 1
 
 
         for idx in self.progress_bar:
             
-            for _ in range(self._update_chart_every_n_steps):
-                self.take_step_geometry(step_counter=step_counter)
-                step_counter += 1
+            if self.oracle_generator is None:
+                for _ in range(self._update_chart_every_n_steps):
+                    self.take_step_geometry(step_counter=step_counter)
+                    step_counter += 1
 
             if self.hyper_grad_leader_how=="unrolled":
                 self.take_step_chart_unrolled(step_counter=step_counter)
@@ -375,9 +379,10 @@ class HereditaryGeometryDiscovery():
                 logging.info("Reached maximum number of steps, stopping optimization.")
                 break
 
-            # if idx%self._save_every == 0:
-            #     self.save(f"{self._save_dir}/step_{idx}/hereditary_geometry_discovery.pt")
-            #     logging.info(f"Saved model at step {idx}.")
+            if idx%self._save_every == 0:
+                os.mkdir(f"{self._save_dir}/step_{idx}") if not os.path.exists(f"{self._save_dir}/step_{idx}") else None
+                self.save(f"{self._save_dir}/step_{idx}/hereditary_geometry_discovery.pt")
+                logging.info(f"Saved model at step {idx}.")
 
 
     def save(self, path: str):
@@ -385,6 +390,7 @@ class HereditaryGeometryDiscovery():
         torch.save({
             'log_lgs': self.log_lgs.param,
             'generator': self.generator.param,
+            'lgs': self.lgs,
             'encoder_state_dict': self.encoder.state_dict(),
             'decoder_state_dict': self.decoder.state_dict(),
             'losses': self._losses,
@@ -449,7 +455,6 @@ class HereditaryGeometryDiscovery():
 
         metrics= {
             "train/left_actions/mean": float(self._losses['left_actions'][-1]),
-            # "train/left_actions/tasks": float(self._losses['left_actions_tasks'][-1]), #TODO, log task level losses.
             "train/generator": float(self._losses['generator'][-1]),
             "train/symmetry/span": float(self._losses['symmetry'][-1]),
             "train/symmetry/reconstruction": float(self._losses['reconstruction'][-1]),
@@ -460,6 +465,9 @@ class HereditaryGeometryDiscovery():
             "diagnostics/cond_num_generator": float(self._diagnostics['cond_num_generator'][-1]),
             "diagnostics/frob_norm_generator": float(self._diagnostics['frob_norm_generator'][-1]),
         }
+        task_losses= self._losses['left_actions_tasks'][-1]
+        for idx_task in range(self._n_tasks-1):
+            metrics[f"train/left_actions/tasks/task_idx={idx_task}"] = float(task_losses[idx_task])
 
         _log_grad_norms(self.encoder, "encoder")
         _log_grad_norms(self.decoder, "decoder")
