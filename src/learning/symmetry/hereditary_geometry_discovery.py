@@ -1,5 +1,6 @@
 import warnings
 import time
+import os
 import logging
 from typing import Literal, List, Tuple, Optional
 
@@ -144,7 +145,6 @@ class HereditaryGeometryDiscovery():
         """Computes kernel alignment loss of all left-actions."""
         # 1. Push-forward
         lgs=torch.linalg.matrix_exp(log_lgs.param)
-        del log_lgs
         tilde_ps=encoder(ps)
         lg_tilde_ps = torch.einsum("Nmn,bn->Nbm", lgs, tilde_ps)
         lg_ps = decoder(lg_tilde_ps)
@@ -171,7 +171,7 @@ class HereditaryGeometryDiscovery():
         _, ortho_lgs_frame_ps = self._project_onto_vector_subspace(lgs_frame_ps, frames_i_lg_ps)
         mean_ortho_comp = lambda vec: torch.norm(vec, dim=(-1)).mean(-1).mean(-1)
         self.task_losses = mean_ortho_comp(ortho_frame_i_lg_ps) + mean_ortho_comp(ortho_lgs_frame_ps)
-        self.task_losses_reg = self._lasso_coef_lgs*torch.norm(lgs, p=1, dim=(-1)).mean(-1).mean(-1)
+        self.task_losses_reg = self._lasso_coef_lgs*torch.norm(log_lgs.param, p=1, dim=(-1)).mean(-1).mean(-1)
 
         if track_loss:
             self._losses["left_actions_tasks"].append(self.task_losses.detach().cpu().numpy())
@@ -379,9 +379,10 @@ class HereditaryGeometryDiscovery():
                 logging.info("Reached maximum number of steps, stopping optimization.")
                 break
 
-            # if idx%self._save_every == 0:
-            #     self.save(f"{self._save_dir}/step_{idx}/hereditary_geometry_discovery.pt")
-            #     logging.info(f"Saved model at step {idx}.")
+            if idx%self._save_every == 0:
+                os.mkdir(f"{self._save_dir}/step_{idx}") if not os.path.exists(f"{self._save_dir}/step_{idx}") else None
+                self.save(f"{self._save_dir}/step_{idx}/hereditary_geometry_discovery.pt")
+                logging.info(f"Saved model at step {idx}.")
 
 
     def save(self, path: str):
@@ -464,6 +465,9 @@ class HereditaryGeometryDiscovery():
             "diagnostics/cond_num_generator": float(self._diagnostics['cond_num_generator'][-1]),
             "diagnostics/frob_norm_generator": float(self._diagnostics['frob_norm_generator'][-1]),
         }
+        task_losses= self._losses['left_actions_tasks'][-1]
+        for idx_task in range(self._n_tasks-1):
+            metrics[f"train/left_actions/tasks/task_idx={idx_task}"] = float(task_losses[idx_task])
 
         _log_grad_norms(self.encoder, "encoder")
         _log_grad_norms(self.decoder, "decoder")
