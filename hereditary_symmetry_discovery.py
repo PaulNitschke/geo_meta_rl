@@ -37,7 +37,7 @@ def train(lr_chart, update_chart_every_n_steps, hyper_grad_leader_how):
     LEARN_GENERATOR=True
     LEARN_ENCODER_DECODER=True
     USE_ORACLE_ROTATION_KERNEL=True
-    N_STEPS=1000000
+    N_STEPS=250_000
     BATCH_SIZE=128
     BANDWIDTH=None
     LEARNING_RATE_LEFT_ACTIONS=0.00035
@@ -102,7 +102,7 @@ def train(lr_chart, update_chart_every_n_steps, hyper_grad_leader_how):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--lr_chart", type=float, default=0.00035, help="Learning rate for the charts.")
+    parser.add_argument("--lr_chart", type=float, default=0.000095, help="Learning rate for the charts.")
     parser.add_argument("--update_chart_every_n_steps", type=int, default=1, help="Update the chart only every n gradient steps.")
     parser.add_argument("--hyper_grad_leader_how", type=bool, default=False, help="Which hypergradients to use for the leader.")
     args = parser.parse_args()

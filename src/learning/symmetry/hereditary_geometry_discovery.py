@@ -135,7 +135,7 @@ class HereditaryGeometryDiscovery():
         torch.manual_seed(seed)
         self._init_optimization()
     
-    def evalute_left_actions(self, 
+    def evaluate_left_actions(self, 
                              ps: torch.Tensor, 
                              log_lgs: torch.Tensor, 
                              encoder: torch.nn.Module,
@@ -143,8 +143,9 @@ class HereditaryGeometryDiscovery():
                              track_loss:bool=True) -> float:
         """Computes kernel alignment loss of all left-actions."""
         # 1. Push-forward
-        tilde_ps=encoder(ps)
         lgs=torch.linalg.matrix_exp(log_lgs.param)
+        del log_lgs
+        tilde_ps=encoder(ps)
         lg_tilde_ps = torch.einsum("Nmn,bn->Nbm", lgs, tilde_ps)
         lg_ps = decoder(lg_tilde_ps)
 
@@ -170,7 +171,7 @@ class HereditaryGeometryDiscovery():
         _, ortho_lgs_frame_ps = self._project_onto_vector_subspace(lgs_frame_ps, frames_i_lg_ps)
         mean_ortho_comp = lambda vec: torch.norm(vec, dim=(-1)).mean(-1).mean(-1)
         self.task_losses = mean_ortho_comp(ortho_frame_i_lg_ps) + mean_ortho_comp(ortho_lgs_frame_ps)
-        self.task_losses_reg = self._lasso_coef_lgs*torch.norm(log_lgs.param, p=1, dim=(-1)).mean(-1).mean(-1)
+        self.task_losses_reg = self._lasso_coef_lgs*torch.norm(lgs, p=1, dim=(-1)).mean(-1).mean(-1)
 
         if track_loss:
             self._losses["left_actions_tasks"].append(self.task_losses.detach().cpu().numpy())
@@ -306,7 +307,7 @@ class HereditaryGeometryDiscovery():
         self.optimizer_lgs.zero_grad()
         self.optimizer_generator.zero_grad()
         
-        loss_left_action = self.evalute_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder, decoder=self.decoder)
+        loss_left_action = self.evaluate_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder, decoder=self.decoder)
         loss_left_action.backward()
 
         self.optimizer_lgs.step()
@@ -337,9 +338,10 @@ class HereditaryGeometryDiscovery():
         self.optimizer_encoder.zero_grad()
         self.optimizer_decoder.zero_grad()
 
-        loss_left_action = self.evalute_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder, decoder=self.decoder)
+        # loss_left_action = self.evaluate_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder, decoder=self.decoder)
         loss_symmetry = self.evalute_symmetry(ps=ps, generator=self.generator.param, encoder=self.encoder, decoder=self.decoder)
-        (loss_left_action + loss_symmetry).backward()            
+        # (loss_left_action + loss_symmetry).backward()
+        loss_symmetry.backward()            
         self.optimizer_encoder.step()
         self.optimizer_decoder.step()
 
@@ -353,16 +355,18 @@ class HereditaryGeometryDiscovery():
         self.progress_bar = tqdm(range(n_steps), desc="Hereditary Symmetry Discovery")
 
         step_counter = 0
-        for _ in range(self._n_steps_pretrain_geometry):
-            self.take_step_geometry(step_counter=step_counter)
-            step_counter += 1
+        if self.oracle_generator is None:
+            for _ in range(self._n_steps_pretrain_geometry):
+                self.take_step_geometry(step_counter=step_counter)
+                step_counter += 1
 
 
         for idx in self.progress_bar:
             
-            for _ in range(self._update_chart_every_n_steps):
-                self.take_step_geometry(step_counter=step_counter)
-                step_counter += 1
+            if self.oracle_generator is None:
+                for _ in range(self._update_chart_every_n_steps):
+                    self.take_step_geometry(step_counter=step_counter)
+                    step_counter += 1
 
             if self.hyper_grad_leader_how=="unrolled":
                 self.take_step_chart_unrolled(step_counter=step_counter)
