@@ -1,12 +1,13 @@
 import os
 import logging
 from typing import Literal, List, Tuple, Optional
+import time
 
 from tqdm import tqdm
 import numpy as np
 import torch
 import wandb
-import pandas as pd
+
 
 from ..initialization import identity_init_neural_net, ExponentialLinearRegressor
 
@@ -381,9 +382,8 @@ class HereditaryGeometryDiscovery():
             else:
                 self.take_step_chart()
             
-            if idx % 50 == 0:
+            if idx % 10000 == 0:
                 self._log_to_wandb()
-
 
             if idx%self._save_every == 0:
                 os.mkdir(f"{self._save_dir}/step_{idx}") if not os.path.exists(f"{self._save_dir}/step_{idx}") else None

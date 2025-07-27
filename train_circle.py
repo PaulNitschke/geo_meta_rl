@@ -40,13 +40,14 @@ def train(parser):
 
 
     # 2. Setup wandb.
+    non_default_args= get_non_default_args(parser, args)
+    _run_name = '_'.join(f"{k}:{v}" for k, v in non_default_args.items()) if non_default_args else "default"
+    run_name = _run_name + '_' + datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    save_dir=f"data/local/experiment/circle_rotation/{run_name}"
+    os.mkdir(save_dir)
+    
     if args.log_wandb:
         WAND_PROJECT_NAME="circle_hereditary_geometry_discovery"
-        non_default_args= get_non_default_args(parser, args)
-        _run_name = '_'.join(f"{k}:{v}" for k, v in non_default_args.items()) if non_default_args else "default"
-        run_name = _run_name + '_' + datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        save_dir=f"data/local/experiment/circle_rotation/{run_name}"
-        os.mkdir(save_dir)
         wandb.init(project=WAND_PROJECT_NAME, name=run_name,config=vars(args))
 
 
