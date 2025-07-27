@@ -18,6 +18,7 @@ class HereditaryGeometryDiscovery():
                  tasks_frameestimators: List[callable],
                  encoder: torch.nn.Module,
                  decoder: torch.nn.Module,
+                 eval_sym_in_follower: bool,
 
                  kernel_dim: int,
                  n_steps_pretrain_geo:int,
@@ -80,6 +81,7 @@ class HereditaryGeometryDiscovery():
         self.batch_size=batch_size
         self.bandwidth=bandwidth
         self.seed=seed
+        self._eval_sym_in_follower = eval_sym_in_follower
 
         self._update_chart_every_n_steps=update_chart_every_n_steps
         self._lasso_coef_lgs=lasso_coef_lgs if lasso_coef_lgs is not None else 0.0
@@ -199,7 +201,7 @@ class HereditaryGeometryDiscovery():
             _, ortho_log_lgs_generator=self._project_onto_tensor_subspace(log_lgs, generator)
             loss_span=torch.mean(torch.linalg.matrix_norm(ortho_log_lgs_generator),dim=0)
             loss_reg=self._lasso_coef_generator*torch.sum(torch.abs(generator))
-            loss_weights = 0
+            loss_weights = torch.tensor(0.0)
             loss = loss_span + loss_reg
 
         if track_loss:
@@ -210,42 +212,49 @@ class HereditaryGeometryDiscovery():
         return loss
 
     
-    def evalute_symmetry(self, 
+    def evaluate_symmetry(self, 
                          ps: torch.Tensor, 
                          generator:torch.Tensor,
                          encoder:torch.nn.Module,
-                         decoder:torch.nn.Module, 
+                         decoder:torch.nn.Module,
+                         eval_sym_in_follower:bool,
                          track_loss: bool=True)->float:
         """
         Evaluates whether the generator is contained within the kernel distribution of the base task (expressed in the encoder and decoder).
         For stable learning, ensure that encoder and decoder are both identity maps in the beginning.
         """
 
-        def compute_vec_jacobian(f: callable, s: torch.tensor)->torch.tensor:
-            """
-            Compute a vectorized Jacobian of function f: n -> m over a batch of states s.
-            Input: tensor s of shape (b,d,n) where both b and d are batch dimensions and n is the dimension of the data.
-            Returns: tensor of shape (b,d,n,m)
-            """
-            return torch.vmap(torch.vmap(torch.func.jacrev(f)))(s)
+        if eval_sym_in_follower:
+            def compute_vec_jacobian(f: callable, s: torch.tensor)->torch.tensor:
+                """
+                Compute a vectorized Jacobian of function f: n -> m over a batch of states s.
+                Input: tensor s of shape (b,d,n) where both b and d are batch dimensions and n is the dimension of the data.
+                Returns: tensor of shape (b,d,n,m)
+                """
+                return torch.vmap(torch.vmap(torch.func.jacrev(f)))(s)
 
-        # Let the generator act on the points in latent space.
-        tilde_ps=encoder(ps)
-        gen_tilde_ps = torch.einsum("dnm,bm->bdn", generator, tilde_ps)
-        jac_decoder=compute_vec_jacobian(decoder, gen_tilde_ps)
-        gen_ps = torch.einsum("bdmn, bdn->bdm", jac_decoder, gen_tilde_ps)
+            # Let the generator act on the points in latent space.
+            tilde_ps=encoder(ps)
+            gen_tilde_ps = torch.einsum("dnm,bm->bdn", generator, tilde_ps)
+            jac_decoder=compute_vec_jacobian(decoder, gen_tilde_ps)
+            gen_ps = torch.einsum("bdmn, bdn->bdm", jac_decoder, gen_tilde_ps)
 
-        # Check symmetry, need to evaluate frame at base points.
-        #TODO, using ground truth kernel distribution.
-        goal_base = self.task_specifications[self.base_task_index]['goal']
-        frame_ps= self.rotation_vector_field(ps, center=goal_base)
-        frame_ps=frame_ps.unsqueeze(0)
+            # Check symmetry, need to evaluate frame at base points.
+            #TODO, using ground truth kernel distribution.
+            goal_base = self.task_specifications[self.base_task_index]['goal']
+            frame_ps= self.rotation_vector_field(ps, center=goal_base)
+            frame_ps=frame_ps.unsqueeze(0)
 
-        _, gen_into_frame = self._project_onto_vector_subspace(gen_ps, frame_ps)
+            _, gen_into_frame = self._project_onto_vector_subspace(gen_ps, frame_ps)
 
-        loss_symmetry= torch.linalg.vector_norm(gen_into_frame, dim=-1).mean(-1).mean()
-        loss_reconstruction= torch.linalg.vector_norm(ps - decoder(encoder(ps)), dim=-1).mean()
-        loss_reg = self._lasso_coef_encoder_decoder * (self._l1_penalty(encoder) + self._l1_penalty(decoder))
+            loss_symmetry= torch.linalg.vector_norm(gen_into_frame, dim=-1).mean(-1).mean()
+            loss_reconstruction= torch.linalg.vector_norm(ps - decoder(encoder(ps)), dim=-1).mean()
+            loss_reg = self._lasso_coef_encoder_decoder * (self._l1_penalty(encoder) + self._l1_penalty(decoder))
+
+        else:
+            loss_symmetry = torch.tensor(0.0, requires_grad=False)
+            loss_reconstruction = torch.tensor(0.0, requires_grad=False)
+            loss_reg = torch.tensor(0.0, requires_grad=False)
 
         if track_loss:
             self._losses["symmetry"].append(loss_symmetry.detach().cpu().numpy())
@@ -315,20 +324,20 @@ class HereditaryGeometryDiscovery():
         for p in self.encoder.parameters(): p.requires_grad = False
         for p in self.decoder.parameters(): p.requires_grad = False
 
-        self.optimizer_lgs.zero_grad()
-        self.optimizer_generator.zero_grad()
-        
+        # 1. Step left-actions, left-action loss is independent of generator.
+        self.optimizer_lgs.zero_grad()        
         loss_left_action = self.evaluate_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder, decoder=self.decoder)
         loss_left_action.backward()
-
         self.optimizer_lgs.step()
 
+        # 2. Step generator.
+        self.optimizer_generator.zero_grad()
         log_lgs_detach_tensor = self.log_lgs.param.detach()
         generator_normed = self.generator.param / torch.linalg.matrix_norm(self.generator.param)
 
         loss_span = self.evaluate_generator_span(generator=generator_normed, log_lgs=log_lgs_detach_tensor)
-        loss_symmetry = self.evalute_symmetry(ps=ps, generator=generator_normed, encoder=self.encoder, decoder=self.decoder)
-        
+        loss_symmetry = self.evaluate_symmetry(ps=ps, generator=generator_normed, encoder=self.encoder, decoder=self.decoder, 
+                                               eval_sym_in_follower=self._eval_sym_in_follower)
         (loss_span + loss_symmetry).backward() 
         self.optimizer_generator.step()
 
@@ -346,8 +355,9 @@ class HereditaryGeometryDiscovery():
         self.optimizer_decoder.zero_grad()
 
         # loss_left_action = self.evaluate_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder, decoder=self.decoder)
-        loss_symmetry = self.evalute_symmetry(ps=ps, generator=self.generator.param, encoder=self.encoder, decoder=self.decoder)
-        # (loss_left_action + loss_symmetry).backward()
+        loss_symmetry = self.evaluate_symmetry(ps=ps, generator=self.generator.param, encoder=self.encoder, decoder=self.decoder,
+                                               eval_sym_in_follower=True)
+        # (loss_left_action + loss_symmetry).backward() #TODO, warning, currently left actions taken out.
         loss_symmetry.backward()            
         self.optimizer_encoder.step()
         self.optimizer_decoder.step()
@@ -362,7 +372,7 @@ class HereditaryGeometryDiscovery():
         if self.oracle_generator is None:
             for _ in range(self._n_steps_pretrain_geo):
                 self.take_step_geometry()
-
+                self._log_to_wandb()
 
         for idx in self.progress_bar:
             
@@ -371,7 +381,8 @@ class HereditaryGeometryDiscovery():
             else:
                 self.take_step_chart()
             
-            self._log_to_wandb()
+            if idx % 50 == 0:
+                self._log_to_wandb()
 
 
             if idx%self._save_every == 0:

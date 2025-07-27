@@ -67,7 +67,9 @@ def train(parser):
 
                                             task_specifications=train_goal_locations, 
                                             use_oracle_rotation_kernel=args.use_oracle_rotation_kernel,
-                                            save_dir=save_dir
+                                            save_dir=save_dir,
+
+                                            eval_sym_in_follower=args.eval_sym_in_follower
                                             )
     
     her_geo_dis.optimize(n_steps=args.n_steps)
