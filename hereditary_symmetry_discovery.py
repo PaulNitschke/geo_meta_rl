@@ -105,6 +105,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr_chart", type=float, default=0.000095, help="Learning rate for the charts.")
     parser.add_argument("--update_chart_every_n_steps", type=int, default=1, help="Update the chart only every n gradient steps.")
     parser.add_argument("--hyper_grad_leader_how", type=bool, default=False, help="Which hypergradients to use for the leader.")
+    parser.add_argument("--evaluate_span_how", type=str, default='orthogonal_complement', help="How to smoothen the span condition for the geometry loss. Either 'learn_weights' or 'orthogonal_complement'.")
     args = parser.parse_args()
     print(f"Training with learning rate for chart: {args.lr_chart} and update frequency: {args.update_chart_every_n_steps}")
     train(args.lr_chart, args.update_chart_every_n_steps, args.hyper_grad_leader_how)
