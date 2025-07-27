@@ -6,7 +6,7 @@ import torch as th
 
 """
 Classes and functions for initialization for hereditary symmetry discovery.
-ExponentialLinearRegressor: intializes left-actions.
+ExponentialLinearRegressor: intializes left-actions via a log-linear regression.
 identity_init_neural_net: initializes a neural network to the identity (used for encoder and decoder).
 """
 
@@ -42,7 +42,8 @@ class ExponentialLinearRegressor(th.nn.Module):
         Fits the model parameters to minimize MSE between exp(W) * X and Y.
         """
         optimizer = th.optim.Adam([self.W], lr=lr)
-        for epoch in range(epochs):
+        pbar = tqdm(range(epochs), desc="Initializing log-left actions")
+        for epoch in pbar:
             optimizer.zero_grad()
             loss = self.loss(X, Y)
             loss.backward()
