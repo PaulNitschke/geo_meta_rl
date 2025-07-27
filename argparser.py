@@ -13,7 +13,7 @@ def get_argparser():
     
     # General optimization parameters: Batch size, learning rates, lasso coefficients.
     parser.add_argument("--batch_size", type=int, default=128, help="Batch size for training")
-    parser.add_argument("--lr_geo", type=float, default=0.00035, help="Learning rate for the geometry loss.")
+    parser.add_argument("--lr_lgs", type=float, default=0.00035, help="Learning rate for the left actions.")
     parser.add_argument("--lr_gen", type=float, default=0.00035, help="Learning rate for the generator loss.")
     parser.add_argument("--lr_chart", type=float, default=0.00035, help="Learning rate for the chart.")
     parser.add_argument("--lasso_coef_lgs", type=float, default=0.5, help="Lasso coefficient for the log-left actions.")

@@ -26,7 +26,7 @@ class HereditaryGeometryDiscovery():
                  log_lg_inits_how:Literal['log_linreg', 'random'],
 
                  batch_size:int,
-                 lr_geo:float,
+                 lr_lgs:float,
                  lr_gen:float,
                  lr_chart:float,
                  lasso_coef_lgs: Optional[float],
@@ -85,7 +85,7 @@ class HereditaryGeometryDiscovery():
         self._lasso_coef_lgs=lasso_coef_lgs if lasso_coef_lgs is not None else 0.0
         self._lasso_coef_encoder_decoder=lasso_coef_encoder_decoder if lasso_coef_encoder_decoder is not None else 0.0
         self._lasso_coef_generator = lasso_coef_generator
-        self._lr_geo=lr_geo
+        self._lr_lgs=lr_lgs
         self._lr_gen=lr_gen
         self._lr_chart=lr_chart
         self._lr_chart=lr_chart
@@ -154,7 +154,7 @@ class HereditaryGeometryDiscovery():
         else:
             # Use oracle rotation kernel
             frame_ps = self.rotation_vector_field(ps, center=self.task_specifications[self.base_task_index]['goal'])
-            goals = torch.stack([torch.tensor(self.task_specifications[i]['goal']) for i in self.task_idxs])
+            goals = torch.stack([self.task_specifications[i]['goal'].clone().detach() for i in self.task_idxs])
             frames_i_lg_ps = torch.stack([
                 self.rotation_vector_field(lg_ps[i], center=goals[i])
                 for i in range(lg_ps.shape[0])], dim=0)
@@ -199,11 +199,12 @@ class HereditaryGeometryDiscovery():
             _, ortho_log_lgs_generator=self._project_onto_tensor_subspace(log_lgs, generator)
             loss_span=torch.mean(torch.linalg.matrix_norm(ortho_log_lgs_generator),dim=0)
             loss_reg=self._lasso_coef_generator*torch.sum(torch.abs(generator))
+            loss_weights = 0
             loss = loss_span + loss_reg
 
         if track_loss:
             self._losses["generator_span"].append(loss_span.detach().cpu().numpy())
-            self._losses["generator_span"].append(loss_weights.detach().cpu().numpy()) if self._eval_span_how == "weights" else None
+            self._losses["generator_weights"].append(loss_weights.detach().cpu().numpy())
             self._losses["generator_reg"].append(loss_reg.detach().cpu().numpy())
 
         return loss
@@ -505,7 +506,7 @@ class HereditaryGeometryDiscovery():
         elif self._log_lg_inits_how == 'random':
             self._log_lg_inits = torch.randn(size=(self._n_tasks-1, self.ambient_dim, self.ambient_dim))
         self.log_lgs=TensorToModule(self._log_lg_inits.clone())
-        self.optimizer_lgs = torch.optim.Adam(self.log_lgs.parameters(),lr=self._lr_geo)
+        self.optimizer_lgs = torch.optim.Adam(self.log_lgs.parameters(),lr=self._lr_lgs)
         
         _generator=torch.stack([torch.eye(self.ambient_dim) for _ in range(self.kernel_dim)]) if self.oracle_generator is None else self.oracle_generator.clone()
         assert _generator.shape == (self.kernel_dim, self.ambient_dim, self.ambient_dim), "Generator must be of shape (d, n, n)." #TODO, this should rather be called Lie group dimension.
