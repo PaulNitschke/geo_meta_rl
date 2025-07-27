@@ -18,33 +18,35 @@ class HereditaryGeometryDiscovery():
     def __init__(self,
                  tasks_ps: List[torch.tensor],
                  tasks_frameestimators: List[callable],
-                 kernel_dim: int,
                  encoder: torch.nn.Module,
                  decoder: torch.nn.Module,
+
+                 kernel_dim: int,
+                 n_steps_pretrain_geometry:int,
                  update_chart_every_n_steps:int,
+                 evaluate_span_how:Literal['learn_weights', 'orthogonal_complement'],
+                 log_lg_inits_how:Literal['log_linreg', 'random'],
+
+
+                 batch_size:int,
                  lr_left_actions:float,
                  lr_generator:float,
                  lr_encoder:float,
                  lr_decoder:float,
-                 n_steps_pretrain_geometry:int,
-                 evaluate_span_how:Literal['learn_weights', 'orthogonal_complement'],
-                 hyper_grad_leader_how: Literal['unrolled', 'implicit', 'blackbox'],
-                 seed:int=42,
-                 log_lg_inits_how:Literal['log_linreg', 'random']= 'log_linreg',
-                 batch_size:int=64,
-                 bandwidth:float=0.5,
+                 lasso_coef_lgs: Optional[float],
+                 lasso_coef_encoder_decoder: Optional[float],
+                 lasso_coef_generator: Optional[float],
 
-                 lasso_coef_lgs: Optional[float] = 0.5,
-                 lasso_coef_encoder_decoder: Optional[float] = 0.005,
-                 lasso_coef_generator: Optional[float] = 0.005,
-                 log_wandb:bool=False,
-                 task_specifications:list=None,
-                 use_oracle_rotation_kernel:bool=False,
-                 oracle_generator: torch.tensor=None,
-                 learn_encoder_decoder:bool=False,
-                 verbose:bool=False,
-                 save_every:int=100,
-                 save_dir:str=None
+                 seed:int,
+                 bandwidth:float,
+                 log_wandb:bool,
+                 verbose:bool,
+                 save_every:int,
+                 
+                 task_specifications:list,
+                 use_oracle_rotation_kernel:bool,
+                 oracle_generator: torch.tensor,
+                 save_dir:str
                 ):
         """Hereditary Geometry Discovery.
         This class implements hereditary symmetry discovery.
@@ -61,7 +63,6 @@ class HereditaryGeometryDiscovery():
         - bandwidth: bandwidth for the kernel density frame estimators.
         - lasso_coef_lgs: regularization weight for the lasso regularizer on the left actions, if None, no regularization is applied.
 
-        - learn_encoder_decoder: whether to learn the encoder and decoder, only use for debugging.
         - oracle_generator: tensor of shape (d, n, n), the generator to be used for symmetry discovery, only use for debugging.
         - task_specifications: list of dictionaries, each containing the goal of the task, only used for debugging.
 
@@ -93,22 +94,17 @@ class HereditaryGeometryDiscovery():
         self._lr_encoder=lr_encoder
         self._lr_decoder=lr_decoder
         self._n_steps_pretrain_geometry=n_steps_pretrain_geometry
-        self.hyper_grad_leader_how=hyper_grad_leader_how
         self._evaluate_span_how=evaluate_span_how
 
         self._log_wandb=log_wandb
         self._use_oracle_rotation_kernel=use_oracle_rotation_kernel
         self.task_specifications=task_specifications
         self.oracle_generator= oracle_generator
-        self._learn_encoder_decoder=learn_encoder_decoder
         self._verbose=verbose
         self._save_every= save_every
         self._save_dir=save_dir
 
         self._validate_inputs()
-
-        logging.info(f"Fitting encoder and decoder: {self._learn_encoder_decoder}")
-
 
         self.ambient_dim=tasks_ps[0][0,:].shape[0]
         self._n_tasks=len(tasks_ps)
@@ -193,7 +189,7 @@ class HereditaryGeometryDiscovery():
         """
 
         if self._evaluate_span_how == "learn_weights":
-            log_lgs_hat = torch.einsum("N,dmn->Nmn", self.weights_lgs_to_gen.param, generator)
+            log_lgs_hat = torch.einsum("Nd,dmn->Nmn", self.weights_lgs_to_gen.param, generator)
             loss_weights = torch.mean((log_lgs_hat - log_lgs) ** 2)
             loss_reg=self._lasso_coef_generator*torch.sum(torch.abs(generator)) + self._lasso_coef_lgs*torch.sum(torch.abs(self.weights_lgs_to_gen.param))
             loss = loss_weights + loss_reg
@@ -384,12 +380,7 @@ class HereditaryGeometryDiscovery():
                     self.take_step_geometry(step_counter=step_counter)
                     step_counter += 1
 
-            if self.hyper_grad_leader_how=="unrolled":
-                self.take_step_chart_unrolled(step_counter=step_counter)
-            elif self.hyper_grad_leader_how=="implicit":
-                self.take_step_chart_implicit(step_counter=step_counter)
-            else:
-                self.take_step_chart(step_counter=step_counter)
+            self.take_step_chart(step_counter=step_counter)
             step_counter += 1
             if step_counter>=n_steps:
                 logging.info("Reached maximum number of steps, stopping optimization.")
@@ -429,10 +420,6 @@ class HereditaryGeometryDiscovery():
         assert self._log_lg_inits_how in ['random', 'log_linreg'], "_log_lg_inits_how must be one of ['random', 'log_linreg']."
         assert len(self.tasks_ps) == len(self.tasks_frameestimators), "Number of tasks and frame estimators must match."
         logging.info("Using oracle generator") if self.oracle_generator is not None else None
-
-        if self._learn_encoder_decoder:
-            assert self.encoder is not None, "Encoder must be provided to learn symmetry."
-            assert self.decoder is not None, "Decoder must be provided to learn symmetry."
 
 
     def _init_log_lgs_linear_reg(self, verbose=False, epochs=10000, log_wandb:bool=False):
@@ -554,7 +541,7 @@ class HereditaryGeometryDiscovery():
         self.optimizer_generator=torch.optim.Adam(self.generator.parameters(), lr=self._lr_generator)
 
         if self._evaluate_span_how=="learn_weights":
-            self.weights_lgs_to_gen = TensorToModule(torch.randn(size=(self.kernel_dim, self._n_tasks-1), requires_grad=True))
+            self.weights_lgs_to_gen = TensorToModule(torch.randn(size=(self._n_tasks-1, self.kernel_dim), requires_grad=True))
             self.optimizer_weights_lgs_to_gen= torch.optim.Adam(self.weights_lgs_to_gen.parameters(), lr=self._lr_generator)
 
         self.encoder= identity_init_neural_net(self.encoder, tasks_ps=self.tasks_ps, name="encoder", log_wandb=self._log_wandb, 
