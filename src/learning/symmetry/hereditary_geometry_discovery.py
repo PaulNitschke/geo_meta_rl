@@ -1,5 +1,3 @@
-import warnings
-import time
 import os
 import logging
 from typing import Literal, List, Tuple, Optional
@@ -22,17 +20,15 @@ class HereditaryGeometryDiscovery():
                  decoder: torch.nn.Module,
 
                  kernel_dim: int,
-                 n_steps_pretrain_geometry:int,
+                 n_steps_pretrain_geo:int,
                  update_chart_every_n_steps:int,
-                 evaluate_span_how:Literal['learn_weights', 'orthogonal_complement'],
+                 eval_span_how:Literal['weights', 'ortho_comp'],
                  log_lg_inits_how:Literal['log_linreg', 'random'],
 
-
                  batch_size:int,
-                 lr_left_actions:float,
-                 lr_generator:float,
-                 lr_encoder:float,
-                 lr_decoder:float,
+                 lr_geo:float,
+                 lr_gen:float,
+                 lr_chart:float,
                  lasso_coef_lgs: Optional[float],
                  lasso_coef_encoder_decoder: Optional[float],
                  lasso_coef_generator: Optional[float],
@@ -89,12 +85,12 @@ class HereditaryGeometryDiscovery():
         self._lasso_coef_lgs=lasso_coef_lgs if lasso_coef_lgs is not None else 0.0
         self._lasso_coef_encoder_decoder=lasso_coef_encoder_decoder if lasso_coef_encoder_decoder is not None else 0.0
         self._lasso_coef_generator = lasso_coef_generator
-        self._lr_left_actions=lr_left_actions
-        self._lr_generator=lr_generator
-        self._lr_encoder=lr_encoder
-        self._lr_decoder=lr_decoder
-        self._n_steps_pretrain_geometry=n_steps_pretrain_geometry
-        self._evaluate_span_how=evaluate_span_how
+        self._lr_geo=lr_geo
+        self._lr_gen=lr_gen
+        self._lr_chart=lr_chart
+        self._lr_chart=lr_chart
+        self._n_steps_pretrain_geo=n_steps_pretrain_geo
+        self._eval_span_how=eval_span_how
 
         self._log_wandb=log_wandb
         self._use_oracle_rotation_kernel=use_oracle_rotation_kernel
@@ -119,7 +115,8 @@ class HereditaryGeometryDiscovery():
         self._losses["left_actions_tasks"]= [[0.0]]
         self._losses["left_actions_tasks_reg"]= [[0.0]]
 
-        self._losses["generator"]= [[0.0]]
+        self._losses["generator_span"]= [[0.0]]
+        self._losses["generator_weights"]= [[0.0]]
         self._losses["generator_reg"] = [[0.0]]
         
         self._losses["symmetry"]= [[0.0]]
@@ -188,7 +185,7 @@ class HereditaryGeometryDiscovery():
         log_lgs are frozen in this loss function (and hence a detached tensor).
         """
 
-        if self._evaluate_span_how == "learn_weights":
+        if self._eval_span_how == "weights":
             log_lgs_hat = torch.einsum("Nd,dmn->Nmn", self.weights_lgs_to_gen.param, generator)
             loss_weights = torch.mean((log_lgs_hat - log_lgs) ** 2)
             loss_reg=self._lasso_coef_generator*torch.sum(torch.abs(generator)) + self._lasso_coef_lgs*torch.sum(torch.abs(self.weights_lgs_to_gen.param))
@@ -198,14 +195,15 @@ class HereditaryGeometryDiscovery():
                 _, ortho_log_lgs_generator=self._project_onto_tensor_subspace(log_lgs, generator)
                 loss_span=torch.mean(torch.linalg.matrix_norm(ortho_log_lgs_generator),dim=0)
 
-        elif self._evaluate_span_how == "orthogonal_complement":
+        elif self._eval_span_how == "ortho_comp":
             _, ortho_log_lgs_generator=self._project_onto_tensor_subspace(log_lgs, generator)
             loss_span=torch.mean(torch.linalg.matrix_norm(ortho_log_lgs_generator),dim=0)
             loss_reg=self._lasso_coef_generator*torch.sum(torch.abs(generator))
             loss = loss_span + loss_reg
 
         if track_loss:
-            self._losses["generator"].append(loss_span.detach().cpu().numpy())
+            self._losses["generator_span"].append(loss_span.detach().cpu().numpy())
+            self._losses["generator_span"].append(loss_weights.detach().cpu().numpy()) if self._eval_span_how == "weights" else None
             self._losses["generator_reg"].append(loss_reg.detach().cpu().numpy())
 
         return loss
@@ -307,7 +305,7 @@ class HereditaryGeometryDiscovery():
         return proj, ortho_comp
     
         
-    def take_step_geometry(self, step_counter:Optional[int]=None):
+    def take_step_geometry(self):
         """Update the geometry variables under a frozen chart."""
         ps = self.tasks_ps[self.base_task_index][torch.randint(0, self._n_samples, (self.batch_size,))]
 
@@ -333,12 +331,8 @@ class HereditaryGeometryDiscovery():
         (loss_span + loss_symmetry).backward() 
         self.optimizer_generator.step()
 
-        if step_counter is not None and step_counter % 5 == 0:
-            self._log_to_wandb(step_counter)
-            time.sleep(0.05)
 
-
-    def take_step_chart(self, step_counter:Optional[int]=None):
+    def take_step_chart(self):
         """Update the chart under frozen geometry variables."""
         ps = self.tasks_ps[self.base_task_index][torch.randint(0, self._n_samples, (self.batch_size,))]
 
@@ -357,34 +351,27 @@ class HereditaryGeometryDiscovery():
         self.optimizer_encoder.step()
         self.optimizer_decoder.step()
 
-        if step_counter is not None and step_counter % 5 == 0:
-            self._log_to_wandb(step_counter)
-            time.sleep(0.05)
 
 
     def optimize(self, n_steps:int=1000):
         """Main optimization loop."""
         self.progress_bar = tqdm(range(n_steps), desc="Hereditary Symmetry Discovery")
 
-        step_counter = 0
+
         if self.oracle_generator is None:
-            for _ in range(self._n_steps_pretrain_geometry):
-                self.take_step_geometry(step_counter=step_counter)
-                step_counter += 1
+            for _ in range(self._n_steps_pretrain_geo):
+                self.take_step_geometry()
 
 
         for idx in self.progress_bar:
             
-            if self.oracle_generator is None:
-                for _ in range(self._update_chart_every_n_steps):
-                    self.take_step_geometry(step_counter=step_counter)
-                    step_counter += 1
+            if idx % self._update_chart_every_n_steps != 0:
+                self.take_step_geometry() if self.oracle_generator is None else None
+            else:
+                self.take_step_chart()
+            
+            self._log_to_wandb()
 
-            self.take_step_chart(step_counter=step_counter)
-            step_counter += 1
-            if step_counter>=n_steps:
-                logging.info("Reached maximum number of steps, stopping optimization.")
-                break
 
             if idx%self._save_every == 0:
                 os.mkdir(f"{self._save_dir}/step_{idx}") if not os.path.exists(f"{self._save_dir}/step_{idx}") else None
@@ -434,7 +421,7 @@ class HereditaryGeometryDiscovery():
         return torch.stack(self._log_lg_inits, dim=0)
     
 
-    def _log_to_wandb(self, step:int):
+    def _log_to_wandb(self):
         """Logs losses to weights and biases."""
         if not self._log_wandb:
             return
@@ -444,26 +431,18 @@ class HereditaryGeometryDiscovery():
             for name, param in module.named_parameters():
                 if param.grad is not None:
                     metrics[f"grad_norms/{prefix}/{name}"] = param.grad.norm().item()
-
-
-        def _convert_tensor_to_dataframe(tensor: torch.tensor) -> pd.DataFrame:
-            """Converts a tensor to a pandas dataframe for wandb logging."""
-            assert tensor.ndim == 2, "Tensor must be 2-dimensional."
-            return pd.DataFrame(
-                tensor.cpu().detach().numpy(),
-                columns=[f"col_{i}" for i in range(tensor.shape[1])],
-                index=[f"row_{i}" for i in range(tensor.shape[0])]
-            )
         
-
         metrics= {
             "train/left_actions/mean": float(self._losses['left_actions'][-1]),
-            "train/generator": float(self._losses['generator'][-1]),
+            "train/regularizers/left_actions/lasso": float(self._losses['left_actions_tasks_reg'][-1]),
+
+            "train/generator_span": float(self._losses['generator_span'][-1]),
+            "train/generator_weights": float(self._losses['generator_weights'][-1]),
+            "train/regularizers/generator/lasso": float(self._losses['generator_reg'][-1]),
+
             "train/symmetry/span": float(self._losses['symmetry'][-1]),
             "train/symmetry/reconstruction": float(self._losses['reconstruction'][-1]),
             "train/regularizers/symmetry": float(self._losses['symmetry_reg'][-1]),
-            "train/regularizers/left_actions/lasso": float(self._losses['left_actions_tasks_reg'][-1]),
-            "train/regularizers/generator/lasso": float(self._losses['generator_reg'][-1]),
 
             "diagnostics/cond_num_generator": float(self._diagnostics['cond_num_generator'][-1]),
             "diagnostics/frob_norm_generator": float(self._diagnostics['frob_norm_generator'][-1]),
@@ -476,15 +455,8 @@ class HereditaryGeometryDiscovery():
         _log_grad_norms(self.decoder, "decoder")
         _log_grad_norms(self.log_lgs, "log_lgs")
         _log_grad_norms(self.generator, "generator")
+        _log_grad_norms(self.weights_lgs_to_gen, "weights_lgs_to_gen") if self._eval_span_how == "weights" else None
 
-        # lgs=self.lgs
-        # for idx_lg in range(self._n_tasks-1):
-        #     table = wandb.Table(dataframe=_convert_tensor_to_dataframe(lgs[idx_lg]))
-        #     wandb.log({f"left_actions/task={idx_lg}": table})
-
-        # for idx_lie_group in range(self.kernel_dim):
-        #     table = wandb.Table(dataframe=_convert_tensor_to_dataframe(self.generator.param[idx_lie_group]))
-        #     wandb.log({f"generator/Lie_dim={idx_lie_group}": table})
         wandb.log(metrics)
 
 
@@ -505,7 +477,7 @@ class HereditaryGeometryDiscovery():
             "left_actions": np.array(self._losses["left_actions"][1:]),
             "left_actions_tasks": np.array(self._losses["left_actions_tasks"][1:]),
             "left_actions_tasks_reg": np.array(self._losses["left_actions_tasks_reg"][1:]),
-            "generator": np.array(self._losses["generator"][1:]),
+            "generator": np.array(self._losses["generator_span"][1:]),
             "symmetry": np.array(self._losses["symmetry"][1:]),
             "reconstruction": np.array(self._losses["reconstruction"][1:]),
             "symmetry_reg": np.array(self._losses["symmetry_reg"][1:]),
@@ -533,16 +505,16 @@ class HereditaryGeometryDiscovery():
         elif self._log_lg_inits_how == 'random':
             self._log_lg_inits = torch.randn(size=(self._n_tasks-1, self.ambient_dim, self.ambient_dim))
         self.log_lgs=TensorToModule(self._log_lg_inits.clone())
-        self.optimizer_lgs = torch.optim.Adam(self.log_lgs.parameters(),lr=self._lr_left_actions)
+        self.optimizer_lgs = torch.optim.Adam(self.log_lgs.parameters(),lr=self._lr_geo)
         
         _generator=torch.stack([torch.eye(self.ambient_dim) for _ in range(self.kernel_dim)]) if self.oracle_generator is None else self.oracle_generator.clone()
         assert _generator.shape == (self.kernel_dim, self.ambient_dim, self.ambient_dim), "Generator must be of shape (d, n, n)." #TODO, this should rather be called Lie group dimension.
         self.generator= TensorToModule(_generator)
-        self.optimizer_generator=torch.optim.Adam(self.generator.parameters(), lr=self._lr_generator)
+        self.optimizer_generator=torch.optim.Adam(self.generator.parameters(), lr=self._lr_gen)
 
-        if self._evaluate_span_how=="learn_weights":
+        if self._eval_span_how=="weights":
             self.weights_lgs_to_gen = TensorToModule(torch.randn(size=(self._n_tasks-1, self.kernel_dim), requires_grad=True))
-            self.optimizer_weights_lgs_to_gen= torch.optim.Adam(self.weights_lgs_to_gen.parameters(), lr=self._lr_generator)
+            self.optimizer_weights_lgs_to_gen= torch.optim.Adam(self.weights_lgs_to_gen.parameters(), lr=self._lr_gen)
 
         self.encoder= identity_init_neural_net(self.encoder, tasks_ps=self.tasks_ps, name="encoder", log_wandb=self._log_wandb, 
                                             #    n_steps=1
@@ -550,5 +522,5 @@ class HereditaryGeometryDiscovery():
         self.decoder= identity_init_neural_net(self.decoder, tasks_ps=self.tasks_ps, name="decoder", log_wandb=self._log_wandb,
                                             #    n_steps=1
                                                )
-        self.optimizer_encoder=torch.optim.Adam(self.encoder.parameters(), lr=self._lr_encoder)
-        self.optimizer_decoder=torch.optim.Adam(self.decoder.parameters(), lr=self._lr_decoder)
+        self.optimizer_encoder=torch.optim.Adam(self.encoder.parameters(), lr=self._lr_chart)
+        self.optimizer_decoder=torch.optim.Adam(self.decoder.parameters(), lr=self._lr_chart)

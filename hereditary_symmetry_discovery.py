@@ -42,11 +42,11 @@ def train(parser):
     # 2. Setup wandb.
     if args.log_wandb:
         WAND_PROJECT_NAME="circle_hereditary_geometry_discovery"
-        non_default_args= get_non_default_args(parser, parser.parse_args([]))
-        run_name = '_'.join(f"{k}={v}" for k, v in non_default_args.items()) + '_' + datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        non_default_args= get_non_default_args(parser, args)
+        run_name = '_'.join(f"{k}:{v}" for k, v in non_default_args.items()) + '_' + datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         save_dir=f"data/local/experiment/circle_rotation/{run_name}"
         os.mkdir(save_dir)
-        wandb.init(project=WAND_PROJECT_NAME, name=run_name,config=parser)
+        wandb.init(project=WAND_PROJECT_NAME, name=run_name,config=vars(args))
 
     her_geo_dis=HereditaryGeometryDiscovery(tasks_ps=tasks_ps,
                                             tasks_frameestimators=tasks_frameestimators, 
@@ -55,16 +55,15 @@ def train(parser):
                                             decoder=DECODER,
 
                                             kernel_dim=args.kernel_dim, 
-                                            n_steps_pretrain_geometry=args.n_steps_pretrain_geometry,
+                                            n_steps_pretrain_geo=args.n_steps_pretrain_geo,
                                             update_chart_every_n_steps=args.update_chart_every_n_steps,
-                                            evaluate_span_how=args.evaluate_span_how,
+                                            eval_span_how=args.eval_span_how,
                                             log_lg_inits_how=args.log_lg_inits_how,
 
                                             batch_size=args.batch_size, 
-                                            lr_left_actions=args.lr_left_actions,
-                                            lr_generator=args.lr_generator,
-                                            lr_encoder=args.lr_chart,
-                                            lr_decoder=args.lr_chart,
+                                            lr_geo=args.lr_geo,
+                                            lr_gen=args.lr_gen,
+                                            lr_chart=args.lr_chart,
                                             lasso_coef_lgs=args.lasso_coef_lgs,
                                             lasso_coef_generator=args.lasso_coef_generator,
                                             lasso_coef_encoder_decoder=args.lasso_coef_encoder_decoder,
