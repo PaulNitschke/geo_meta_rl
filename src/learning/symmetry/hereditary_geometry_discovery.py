@@ -38,6 +38,7 @@ class HereditaryGeometryDiscovery():
                  seed:int,
                  bandwidth:float,
                  log_wandb:bool,
+                 log_wandb_gradients:bool,
                  verbose:bool,
                  save_every:int,
                  
@@ -74,33 +75,35 @@ class HereditaryGeometryDiscovery():
 
         self.tasks_ps= tasks_ps
         self.tasks_frameestimators=tasks_frameestimators
-        self.kernel_dim=kernel_dim
-        self.base_task_index=0
-        self._log_lg_inits_how=log_lg_inits_how
+        self.oracle_generator= oracle_generator
         self.encoder=encoder
         self.decoder=decoder
-        self.batch_size=batch_size
-        self.bandwidth=bandwidth
-        self.seed=seed
-        self._eval_sym_in_follower = eval_sym_in_follower
+        self.task_specifications=task_specifications
+        self.base_task_index=0
 
+        self.kernel_dim=kernel_dim
+        self._n_steps_pretrain_geo=n_steps_pretrain_geo
         self._update_chart_every_n_steps=update_chart_every_n_steps
-        self._lasso_coef_lgs=lasso_coef_lgs if lasso_coef_lgs is not None else 0.0
-        self._lasso_coef_encoder_decoder=lasso_coef_encoder_decoder if lasso_coef_encoder_decoder is not None else 0.0
-        self._lasso_coef_generator = lasso_coef_generator
+        self._eval_span_how=eval_span_how
+        self._log_lg_inits_how=log_lg_inits_how
+
+        self.batch_size=batch_size
         self._lr_lgs=lr_lgs
         self._lr_gen=lr_gen
         self._lr_chart=lr_chart
-        self._lr_chart=lr_chart
-        self._n_steps_pretrain_geo=n_steps_pretrain_geo
-        self._eval_span_how=eval_span_how
-
+        self._lasso_coef_lgs=lasso_coef_lgs
+        self._lasso_coef_generator = lasso_coef_generator
+        self._lasso_coef_encoder_decoder=lasso_coef_encoder_decoder
+        
+        self.seed=seed
+        self.bandwidth=bandwidth
         self._log_wandb=log_wandb
-        self._use_oracle_rotation_kernel=use_oracle_rotation_kernel
-        self.task_specifications=task_specifications
-        self.oracle_generator= oracle_generator
+        self._log_wandb_gradients=log_wandb_gradients
         self._verbose=verbose
         self._save_every= save_every
+        
+        self._eval_sym_in_follower = eval_sym_in_follower
+        self._use_oracle_rotation_kernel=use_oracle_rotation_kernel
         self._save_dir=save_dir
 
         self._validate_inputs()
@@ -463,11 +466,12 @@ class HereditaryGeometryDiscovery():
         for idx_task in range(self._n_tasks-1):
             metrics[f"train/left_actions/tasks/task_idx={idx_task}"] = float(task_losses[idx_task])
 
-        _log_grad_norms(self.encoder, "encoder")
-        _log_grad_norms(self.decoder, "decoder")
-        _log_grad_norms(self.log_lgs, "log_lgs")
-        _log_grad_norms(self.generator, "generator")
-        _log_grad_norms(self.weights_lgs_to_gen, "weights_lgs_to_gen") if self._eval_span_how == "weights" else None
+        if self._log_wandb_gradients:
+            _log_grad_norms(self.encoder, "encoder")
+            _log_grad_norms(self.decoder, "decoder")
+            _log_grad_norms(self.log_lgs, "log_lgs")
+            _log_grad_norms(self.generator, "generator")
+            _log_grad_norms(self.weights_lgs_to_gen, "weights_lgs_to_gen") if self._eval_span_how == "weights" else None
 
         wandb.log(metrics)
 
