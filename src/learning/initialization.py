@@ -15,11 +15,12 @@ class ExponentialLinearRegressor(th.nn.Module):
     """
     # Learns a matrix W such that exp(W) \cdot X ≈ Y.
     """
-    def __init__(self, input_dim: int, seed:int, log_wandb:bool=True):
+    def __init__(self, input_dim: int, seed:int, log_wandb:bool=True, task_idx:str="0"):
         super().__init__()
         th.manual_seed(seed)
         self.W = th.nn.Parameter(th.randn(input_dim, input_dim))
         self.log_wandb = log_wandb
+        self.task_idx=task_idx
 
     def forward(self, X: th.Tensor) -> th.Tensor:
         """
@@ -27,7 +28,7 @@ class ExponentialLinearRegressor(th.nn.Module):
         Returns: (N, n) prediction
         """
         W_exp = th.matrix_exp(self.W)
-        return (W_exp @ X.T).T  # Apply from left, return (N, n)
+        return (W_exp @ X.T).T
 
     def loss(self, X: th.Tensor, Y: th.Tensor) -> th.Tensor:
         """
@@ -42,7 +43,7 @@ class ExponentialLinearRegressor(th.nn.Module):
         Fits the model parameters to minimize MSE between exp(W) * X and Y.
         """
         optimizer = th.optim.Adam([self.W], lr=lr)
-        pbar = tqdm(range(epochs), desc="Initializing log-left actions")
+        pbar = tqdm(range(epochs), desc=f"Initializing log-left action of task {self.task_idx}")
         for epoch in pbar:
             optimizer.zero_grad()
             loss = self.loss(X, Y)
@@ -53,7 +54,7 @@ class ExponentialLinearRegressor(th.nn.Module):
                     "total": f"{loss.item():.4e}"
                 })
             if self.log_wandb and (epoch % 50 == 0):
-                wandb.log({"init/log_left_actions": loss.item()})
+                wandb.log({f"init/log_left_action_task:{self.task_idx}": loss.item()})
                 time.sleep(0.05)     
         return self.W.data.clone()
     
@@ -78,7 +79,7 @@ def identity_init_neural_net(network: callable,
 
     opt = th.optim.Adam(network.parameters(), lr=1e-3)
 
-    pbar = tqdm(range(n_steps), desc="Initializing to identity")
+    pbar = tqdm(range(n_steps), desc=f"Initializing {name} to identity")
 
     for step in pbar:
         opt.zero_grad()

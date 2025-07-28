@@ -32,18 +32,19 @@ class HereditaryGeometryDiscovery():
                  lr_gen:float,
                  lr_chart:float,
                  lasso_coef_lgs: Optional[float],
-                 lasso_coef_encoder_decoder: Optional[float],
                  lasso_coef_generator: Optional[float],
+                 lasso_coef_encoder_decoder: Optional[float],
 
                  seed:int,
                  bandwidth:float,
                  log_wandb:bool,
                  log_wandb_gradients:bool,
-                 verbose:bool,
                  save_every:int,
                  
                  task_specifications:list,
                  use_oracle_rotation_kernel:bool,
+                 oracle_encoder: torch.nn.Module,
+                 oracle_decoder: torch.nn.Module,
                  oracle_generator: torch.tensor,
                  save_dir:str
                 ):
@@ -80,6 +81,7 @@ class HereditaryGeometryDiscovery():
         self.decoder=decoder
         self.task_specifications=task_specifications
         self.base_task_index=0
+        self._log_wandb_every=1000
 
         self.kernel_dim=kernel_dim
         self._n_steps_pretrain_geo=n_steps_pretrain_geo
@@ -99,12 +101,13 @@ class HereditaryGeometryDiscovery():
         self.bandwidth=bandwidth
         self._log_wandb=log_wandb
         self._log_wandb_gradients=log_wandb_gradients
-        self._verbose=verbose
         self._save_every= save_every
         
         self._eval_sym_in_follower = eval_sym_in_follower
         self._use_oracle_rotation_kernel=use_oracle_rotation_kernel
         self._save_dir=save_dir
+        self._oracle_encoder= oracle_encoder
+        self._oracle_decoder= oracle_decoder
 
         self._validate_inputs()
 
@@ -117,20 +120,22 @@ class HereditaryGeometryDiscovery():
         self.frame_i_tasks= [self.tasks_frameestimators[i] for i in self.task_idxs]
 
         self._losses, self._diagnostics={}, {}
-        self._losses["left_actions"]= [[0.0]]
-        self._losses["left_actions_tasks"]= [[0.0]]
-        self._losses["left_actions_tasks_reg"]= [[0.0]]
+        self._losses["left_actions"]= [0.0]
+        self._losses["left_actions_tasks"]= [np.zeros(self._n_tasks-1, dtype=np.float32)]
+        self._losses["left_actions_tasks_reg"]= [0.0]
 
-        self._losses["generator_span"]= [[0.0]]
-        self._losses["generator_weights"]= [[0.0]]
-        self._losses["generator_reg"] = [[0.0]]
+        self._losses["generator_span"]= [0.0]
+        self._losses["generator_weights"]= [0.0]
+        self._losses["generator_reg"] = [0.0]
         
-        self._losses["symmetry"]= [[0.0]]
-        self._losses["reconstruction"]= [[0.0]]
-        self._losses["symmetry_reg"] = [[0.0]]
+        self._losses["symmetry"]= [0.0]
+        self._losses["reconstruction"]= [0.0]
+        self._losses["symmetry_reg"] = [0.0]
 
-        self._diagnostics["cond_num_generator"] = [[0.0]]
-        self._diagnostics["frob_norm_generator"] = [[0.0]]
+        self._diagnostics["cond_num_generator"] = [0.0]
+        self._diagnostics["frob_norm_generator"] = [0.0]
+        self._diagnostics["encoder_loss_oracle"] = [0.0] if self._oracle_encoder is not None else None
+        self._diagnostics["decoder_loss_oracle"] = [0.0] if self._oracle_decoder is not None else None
         
 
         # Optimization variables
@@ -260,10 +265,19 @@ class HereditaryGeometryDiscovery():
             loss_reconstruction = torch.tensor(0.0, requires_grad=False)
             loss_reg = torch.tensor(0.0, requires_grad=False)
 
+        if self._oracle_encoder is not None and self._oracle_decoder is not None:
+            with torch.no_grad():
+                encoder_loss_oracle = torch.norm(self._oracle_encoder(ps) - encoder(ps), dim=-1).sum(0)
+                decoder_loss_oracle = torch.norm(self._oracle_decoder(ps) - decoder(ps), dim=-1).sum(0)
+            if track_loss:
+                self._diagnostics["encoder_loss_oracle"].append(encoder_loss_oracle.detach().cpu().numpy())
+                self._diagnostics["decoder_loss_oracle"].append(decoder_loss_oracle.detach().cpu().numpy())
+
         if track_loss:
             self._losses["symmetry"].append(loss_symmetry.detach().cpu().numpy())
             self._losses["reconstruction"].append(loss_reconstruction.detach().cpu().numpy())
             self._losses["symmetry_reg"].append(loss_reg.detach().cpu().numpy())
+
 
         return loss_symmetry+loss_reconstruction+loss_reg
     
@@ -370,13 +384,17 @@ class HereditaryGeometryDiscovery():
 
     def optimize(self, n_steps:int=1000):
         """Main optimization loop."""
+        self.progress_bar_pretrain = tqdm(range(self._n_steps_pretrain_geo), desc="Pretrain left actions and generator.")
         self.progress_bar = tqdm(range(n_steps), desc="Hereditary Symmetry Discovery")
 
 
         if self.oracle_generator is None:
-            for _ in range(self._n_steps_pretrain_geo):
+            for idx in self.progress_bar_pretrain:
                 self.take_step_geometry()
-                self._log_to_wandb()
+
+                if idx % self._log_wandb_every == 0:
+                    self._log_to_wandb(step=idx)
+                    time.sleep(0.05)
 
         for idx in self.progress_bar:
             
@@ -385,8 +403,9 @@ class HereditaryGeometryDiscovery():
             else:
                 self.take_step_chart()
             
-            if idx % 10000 == 0:
-                self._log_to_wandb()
+            if idx % self._log_wandb_every == 0:
+                self._log_to_wandb(step=idx)
+                time.sleep(0.05)
 
             if idx%self._save_every == 0:
                 os.mkdir(f"{self._save_dir}/step_{idx}") if not os.path.exists(f"{self._save_dir}/step_{idx}") else None
@@ -429,14 +448,14 @@ class HereditaryGeometryDiscovery():
         logging.info("Fitting log-linear regressors to initialize left actions.")
         self._log_lg_inits = [
             ExponentialLinearRegressor(input_dim=self.ambient_dim, seed=self.seed, log_wandb=log_wandb).fit(
-                X=self.tasks_ps[0], Y=self.tasks_ps[idx_task], epochs=epochs
+                X=self.tasks_ps[0], Y=self.tasks_ps[idx_task], epochs=epochs, idx_task=idx_task
             )
             for idx_task in self.task_idxs]
         logging.info("Finished fitting log-linear regressors to initialize left actions.")       
         return torch.stack(self._log_lg_inits, dim=0)
     
 
-    def _log_to_wandb(self):
+    def _log_to_wandb(self, step:int):
         """Logs losses to weights and biases."""
         if not self._log_wandb:
             return
@@ -446,7 +465,7 @@ class HereditaryGeometryDiscovery():
             for name, param in module.named_parameters():
                 if param.grad is not None:
                     metrics[f"grad_norms/{prefix}/{name}"] = param.grad.norm().item()
-        
+
         metrics= {
             "train/left_actions/mean": float(self._losses['left_actions'][-1]),
             "train/regularizers/left_actions/lasso": float(self._losses['left_actions_tasks_reg'][-1]),
@@ -462,6 +481,11 @@ class HereditaryGeometryDiscovery():
             "diagnostics/cond_num_generator": float(self._diagnostics['cond_num_generator'][-1]),
             "diagnostics/frob_norm_generator": float(self._diagnostics['frob_norm_generator'][-1]),
         }
+
+        if self._diagnostics["encoder_loss_oracle"] is not None and self._diagnostics["decoder_loss_oracle"] is not None:
+            metrics["diagnostics/encoder_loss_oracle"] = float(self._diagnostics['encoder_loss_oracle'][-1])
+            metrics["diagnostics/decoder_loss_oracle"] = float(self._diagnostics['decoder_loss_oracle'][-1])
+
         task_losses= self._losses['left_actions_tasks'][-1]
         for idx_task in range(self._n_tasks-1):
             metrics[f"train/left_actions/tasks/task_idx={idx_task}"] = float(task_losses[idx_task])
@@ -473,7 +497,7 @@ class HereditaryGeometryDiscovery():
             _log_grad_norms(self.generator, "generator")
             _log_grad_norms(self.weights_lgs_to_gen, "weights_lgs_to_gen") if self._eval_span_how == "weights" else None
 
-        wandb.log(metrics)
+        wandb.log(metrics, step=step)
 
 
     @property
