@@ -37,7 +37,7 @@ class ExponentialLinearRegressor(th.nn.Module):
         return th.mean((Y - Y_pred) ** 2)
 
     def fit(self, X: th.Tensor, Y: th.Tensor, lr: float = 1e-2,
-            epochs: int = 1000, verbose: bool = False):
+            epochs: int = 1000):
         """
         Fits the model parameters to minimize MSE between exp(W) * X and Y.
         """
@@ -48,8 +48,10 @@ class ExponentialLinearRegressor(th.nn.Module):
             loss = self.loss(X, Y)
             loss.backward()
             optimizer.step()
-            if verbose and epoch % 100 == 0:
-                print(f"Epoch {epoch}: Loss = {loss.item():.6f}")
+            if epoch%100==0:
+                pbar.set_postfix({
+                    "total": f"{loss.item():.4e}"
+                })
             if self.log_wandb and (epoch % 50 == 0):
                 wandb.log({"init/log_left_actions": loss.item()})
                 time.sleep(0.05)     

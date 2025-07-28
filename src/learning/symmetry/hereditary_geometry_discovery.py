@@ -424,12 +424,12 @@ class HereditaryGeometryDiscovery():
         logging.info("Using oracle generator") if self.oracle_generator is not None else None
 
 
-    def _init_log_lgs_linear_reg(self, verbose=False, epochs=10000, log_wandb:bool=False):
+    def _init_log_lgs_linear_reg(self, epochs=10000, log_wandb:bool=False):
         """Fits log-linear regressors to initialize left actions."""
         logging.info("Fitting log-linear regressors to initialize left actions.")
         self._log_lg_inits = [
             ExponentialLinearRegressor(input_dim=self.ambient_dim, seed=self.seed, log_wandb=log_wandb).fit(
-                X=self.tasks_ps[0], Y=self.tasks_ps[idx_task], verbose=verbose, epochs=epochs
+                X=self.tasks_ps[0], Y=self.tasks_ps[idx_task], epochs=epochs
             )
             for idx_task in self.task_idxs]
         logging.info("Finished fitting log-linear regressors to initialize left actions.")       
@@ -513,7 +513,7 @@ class HereditaryGeometryDiscovery():
 
 
         if self._log_lg_inits_how == 'log_linreg':
-            self._log_lg_inits=self._init_log_lgs_linear_reg(verbose=False, log_wandb=self._log_wandb, 
+            self._log_lg_inits=self._init_log_lgs_linear_reg(log_wandb=self._log_wandb, 
                                                              epochs=2_500,
                                                             #  epochs=1
                                                              )

@@ -45,7 +45,7 @@ def train(parser):
     run_name = _run_name + '_' + datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     save_dir=f"data/local/experiment/circle_rotation/{run_name}"
     os.mkdir(save_dir)
-    
+
     if args.log_wandb:
         WAND_PROJECT_NAME="circle_hereditary_geometry_discovery"
         wandb.init(project=WAND_PROJECT_NAME, name=run_name,config=vars(args))
@@ -63,7 +63,7 @@ def train(parser):
                                             lr_lgs=args.lr_lgs,lr_gen=args.lr_gen,lr_chart=args.lr_chart,
                                             lasso_coef_lgs=args.lasso_coef_lgs, lasso_coef_generator=args.lasso_coef_generator, lasso_coef_encoder_decoder=args.lasso_coef_encoder_decoder,
                                             
-                                            seed=args.seed, log_wandb=args.log_wandb, verbose=args.verbose, save_every=args.save_every,
+                                            seed=args.seed, log_wandb=args.log_wandb, log_wandb_gradients=args.log_wandb_gradients, verbose=args.verbose, save_every=args.save_every,
                                             bandwidth=args.bandwidth,
 
                                             task_specifications=train_goal_locations, 
