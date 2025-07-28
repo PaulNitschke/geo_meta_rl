@@ -10,10 +10,26 @@ from src.utils import load_replay_buffer_and_kernel, Affine2D
 FOLDER_NAME: str="data/local/experiment/circle_rotation"
 TASK_NAMES=["sac_circle_rotation_task_0", "sac_circle_rotation_task_1", "sac_circle_rotation_task_2", "sac_circle_rotation_task_3"]
 
+train_goal_locations=[
+    {'goal': torch.tensor([-0.70506063,  0.70914702])},
+    {'goal': torch.tensor([ 0.95243384, -0.30474544])},
+    {'goal': torch.tensor([-0.11289421, -0.99360701])},
+    {'goal': torch.tensor([-0.81394263, -0.58094525])}]
+
 LOAD_WHAT:str="next_observations"
 N_SAMPLES=50_000
 ENCODER=Affine2D(input_dim=2, output_dim=2)
 DECODER=Affine2D(input_dim=2, output_dim=2)
+ORACLE_ENCODER=Affine2D(input_dim=2, output_dim=2)
+ORACLE_DECODER=Affine2D(input_dim=2, output_dim=2)
+
+ORACLE_GENERATOR=torch.tensor([[0, -1], [1,0]], dtype=torch.float32, requires_grad=False).unsqueeze(0)
+
+with torch.no_grad():
+    ORACLE_ENCODER.linear.weight.copy_(torch.eye(2))
+    ORACLE_DECODER.linear.weight.copy_(torch.eye(2))
+    ORACLE_ENCODER.linear.bias.copy_(-train_goal_locations[0]["goal"])
+    ORACLE_DECODER.linear.bias.copy_(train_goal_locations[0]["goal"])
 
 def train(parser):
     """Trains hereditary symmetry discovery on circle where we change the learning rate for the chart and the update frequency of the chart."""
@@ -27,17 +43,7 @@ def train(parser):
         tasks_ps.append(ps)
         tasks_frameestimators.append(frameestimator)
 
-
-    train_goal_locations=[
-        {'goal': torch.tensor([-0.70506063,  0.70914702])},
-        {'goal': torch.tensor([ 0.95243384, -0.30474544])},
-        {'goal': torch.tensor([-0.11289421, -0.99360701])},
-        {'goal': torch.tensor([-0.81394263, -0.58094525])}]
-
-
-
-    ORACLE_GENERATOR=torch.tensor([[0, -1], [1,0]], dtype=torch.float32, requires_grad=False).unsqueeze(0) if not args.learn_generator else None
-
+    oracle_generator=ORACLE_GENERATOR if not args.learn_generator else None
 
     # 2. Setup wandb.
     non_default_args= get_non_default_args(parser, args)
@@ -45,7 +51,7 @@ def train(parser):
     run_name = _run_name + '_' + datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     save_dir=f"data/local/experiment/circle_rotation/{run_name}"
     os.mkdir(save_dir)
-    
+
     if args.log_wandb:
         WAND_PROJECT_NAME="circle_hereditary_geometry_discovery"
         wandb.init(project=WAND_PROJECT_NAME, name=run_name,config=vars(args))
@@ -53,7 +59,7 @@ def train(parser):
 
     # 3. Train.
     her_geo_dis=HereditaryGeometryDiscovery(tasks_ps=tasks_ps,tasks_frameestimators=tasks_frameestimators, 
-                                            oracle_generator=ORACLE_GENERATOR, encoder=ENCODER, decoder=DECODER,
+                                            oracle_generator=oracle_generator, encoder=ENCODER, decoder=DECODER,
 
                                             kernel_dim=args.kernel_dim, n_steps_pretrain_geo=args.n_steps_pretrain_geo,
                                             update_chart_every_n_steps=args.update_chart_every_n_steps, eval_span_how=args.eval_span_how,
@@ -63,14 +69,15 @@ def train(parser):
                                             lr_lgs=args.lr_lgs,lr_gen=args.lr_gen,lr_chart=args.lr_chart,
                                             lasso_coef_lgs=args.lasso_coef_lgs, lasso_coef_generator=args.lasso_coef_generator, lasso_coef_encoder_decoder=args.lasso_coef_encoder_decoder,
                                             
-                                            seed=args.seed, log_wandb=args.log_wandb, verbose=args.verbose, save_every=args.save_every,
+                                            seed=args.seed, log_wandb=args.log_wandb, log_wandb_gradients=args.log_wandb_gradients, save_every=args.save_every,
                                             bandwidth=args.bandwidth,
 
                                             task_specifications=train_goal_locations, 
                                             use_oracle_rotation_kernel=args.use_oracle_rotation_kernel,
                                             save_dir=save_dir,
 
-                                            eval_sym_in_follower=args.eval_sym_in_follower
+                                            eval_sym_in_follower=args.eval_sym_in_follower,
+                                            oracle_encoder=ORACLE_ENCODER, oracle_decoder=ORACLE_DECODER
                                             )
     
     her_geo_dis.optimize(n_steps=args.n_steps)
