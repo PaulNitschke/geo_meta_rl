@@ -362,7 +362,7 @@ class HereditaryGeometryDiscovery():
 
     def take_step_chart(self):
         """Update the chart under frozen geometry variables."""
-        ps = self.tasks_ps[self.base_task_index][torch.randint(0, self._n_samples, (self.batch_size,))]
+        ps = self.tasks_ps[self.base_task_index][torch.randint(0, self._n_samples, (self.batch_size,))] #TODO, probably need to sample from all tasks for this to globally train encoder/ decoder.
 
         for p in self.log_lgs.parameters(): p.requires_grad = False
         for p in self.generator.parameters(): p.requires_grad = False
@@ -447,8 +447,8 @@ class HereditaryGeometryDiscovery():
         """Fits log-linear regressors to initialize left actions."""
         logging.info("Fitting log-linear regressors to initialize left actions.")
         self._log_lg_inits = [
-            ExponentialLinearRegressor(input_dim=self.ambient_dim, seed=self.seed, log_wandb=log_wandb).fit(
-                X=self.tasks_ps[0], Y=self.tasks_ps[idx_task], epochs=epochs, idx_task=idx_task
+            ExponentialLinearRegressor(input_dim=self.ambient_dim, seed=self.seed, log_wandb=log_wandb, idx_task=idx_task).fit(
+                X=self.tasks_ps[0], Y=self.tasks_ps[idx_task], epochs=epochs
             )
             for idx_task in self.task_idxs]
         logging.info("Finished fitting log-linear regressors to initialize left actions.")       
