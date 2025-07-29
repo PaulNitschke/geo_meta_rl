@@ -18,18 +18,27 @@ train_goal_locations=[
 
 LOAD_WHAT:str="next_observations"
 N_SAMPLES=50_000
-ENCODER=Affine2D(input_dim=2, output_dim=2)
-DECODER=Affine2D(input_dim=2, output_dim=2)
-ORACLE_ENCODER=Affine2D(input_dim=2, output_dim=2)
-ORACLE_DECODER=Affine2D(input_dim=2, output_dim=2)
 
-ORACLE_GENERATOR=torch.tensor([[0, -1], [1,0]], dtype=torch.float32, requires_grad=False).unsqueeze(0)
+
+# Define oracle charts and generator, only used for debugging.
+ENCODER_GEO=Affine2D(input_dim=2, output_dim=2)
+ENCODER_SYM=Affine2D(input_dim=2, output_dim=2)
+ORACLE_ENCODER_GEO=Affine2D(input_dim=2, output_dim=2)
+ORACLE_DECODER_GEO=Affine2D(input_dim=2, output_dim=2)
+ORACLE_ENCODER_SYM=Affine2D(input_dim=2, output_dim=2)
+ORACLE_DECODER_SYM=Affine2D(input_dim=2, output_dim=2)
+
+ORACLE_GENERATOR=torch.tensor([[0,-1], [1,0]], dtype=torch.float32, requires_grad=False).unsqueeze(0)
 
 with torch.no_grad():
-    ORACLE_ENCODER.linear.weight.copy_(torch.eye(2))
-    ORACLE_DECODER.linear.weight.copy_(torch.eye(2))
-    ORACLE_ENCODER.linear.bias.copy_(-train_goal_locations[0]["goal"])
-    ORACLE_DECODER.linear.bias.copy_(train_goal_locations[0]["goal"])
+    ORACLE_ENCODER_GEO.linear.weight.copy_(torch.eye(2))
+    ORACLE_DECODER_GEO.linear.weight.copy_(torch.eye(2))
+    ORACLE_ENCODER_SYM.linear.weight.copy_(torch.eye(2))
+    ORACLE_DECODER_SYM.linear.weight.copy_(torch.eye(2))
+    ORACLE_ENCODER_GEO.linear.bias.copy_(torch.zeros(2))
+    ORACLE_DECODER_GEO.linear.bias.copy_(torch.zeros(2))
+    ORACLE_ENCODER_SYM.linear.bias.copy_(-train_goal_locations[0]["goal"])
+    ORACLE_DECODER_SYM.linear.bias.copy_(train_goal_locations[0]["goal"])
 
 def train(parser):
     """Trains hereditary symmetry discovery on circle where we change the learning rate for the chart and the update frequency of the chart."""
@@ -59,19 +68,31 @@ def train(parser):
 
 
     # 3. Train.
-    her_geo_dis=HereditaryGeometryDiscovery(tasks_ps=tasks_ps,tasks_frameestimators=tasks_frameestimators, 
-                                            oracle_generator=oracle_generator, encoder=ENCODER, decoder=DECODER,
+    her_geo_dis=HereditaryGeometryDiscovery(tasks_ps=tasks_ps,
+                                            tasks_frameestimators=tasks_frameestimators, 
+                                            oracle_generator=oracle_generator, 
+                                            encoder_geo=ENCODER_GEO, 
+                                            encoder_sym=ENCODER_SYM,
 
-                                            kernel_dim=args.kernel_dim, n_steps_pretrain_geo=args.n_steps_pretrain_geo,
-                                            update_chart_every_n_steps=args.update_chart_every_n_steps, eval_span_how=args.eval_span_how,
+                                            kernel_dim=args.kernel_dim,
+                                            update_chart_every_n_steps=args.update_chart_every_n_steps, 
+                                            eval_span_how=args.eval_span_how,
                                             log_lg_inits_how=args.log_lg_inits_how,
 
                                             batch_size=args.batch_size, 
-                                            lr_lgs=args.lr_lgs,lr_gen=args.lr_gen,lr_chart=args.lr_chart,
-                                            lasso_coef_lgs=args.lasso_coef_lgs, lasso_coef_generator=args.lasso_coef_generator, lasso_coef_encoder_decoder=args.lasso_coef_encoder_decoder,
-                                            n_epochs_pretrain_log_lgs= args.n_epochs_pretrain_log_lgs, n_epochs_init_neural_nets= args.n_epochs_init_neural_nets,
+                                            lr_lgs=args.lr_lgs,
+                                            lr_gen=args.lr_gen,
+                                            lr_chart=args.lr_chart,
+                                            lasso_coef_lgs=args.lasso_coef_lgs, 
+                                            lasso_coef_generator=args.lasso_coef_generator, 
+                                            lasso_coef_encoder_decoder=args.lasso_coef_encoder_decoder,
+                                            n_epochs_pretrain_log_lgs= args.n_epochs_pretrain_log_lgs, 
+                                            n_epochs_init_neural_nets= args.n_epochs_init_neural_nets,
 
-                                            seed=args.seed, log_wandb=args.log_wandb, log_wandb_gradients=args.log_wandb_gradients, save_every=args.save_every,
+                                            seed=args.seed, 
+                                            log_wandb=args.log_wandb, 
+                                            log_wandb_gradients=args.log_wandb_gradients, 
+                                            save_every=args.save_every,
                                             bandwidth=args.bandwidth,
 
                                             task_specifications=train_goal_locations, 
@@ -79,10 +100,13 @@ def train(parser):
                                             save_dir=save_dir,
 
                                             eval_sym_in_follower=args.eval_sym_in_follower,
-                                            oracle_encoder=ORACLE_ENCODER, oracle_decoder=ORACLE_DECODER
+                                            oracle_encoder_geo=ORACLE_ENCODER_GEO, 
+                                            oracle_decoder_geo=ORACLE_DECODER_GEO,
+                                            oracle_encoder_sym=ORACLE_ENCODER_SYM, 
+                                            oracle_decoder_sym=ORACLE_DECODER_SYM
                                             )
     
-    her_geo_dis.optimize(n_steps=args.n_steps)
+    her_geo_dis.optimize(n_steps_geo=args.n_steps_geo, n_steps_sym=args.n_steps_sym)
     her_geo_dis.save(f"{save_dir}/hereditary_geometry_discovery.pt")
     wandb.finish()
 

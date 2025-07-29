@@ -20,9 +20,7 @@ class HereditaryGeometryDiscovery():
                  tasks_ps: List[torch.tensor],
                  tasks_frameestimators: List[callable],
                  encoder_geo: torch.nn.Module,
-                 decoder_geo: torch.nn.Module,
                  encoder_sym: torch.nn.Module,
-                 decoder_sym: torch.nn.Module,
                  eval_sym_in_follower: bool,
 
                  kernel_dim: int,
@@ -48,6 +46,8 @@ class HereditaryGeometryDiscovery():
                  
                  task_specifications:list,
                  use_oracle_rotation_kernel:bool,
+                 oracle_encoder_geo: torch.nn.Module,
+                 oracle_decoder_geo: torch.nn.Module,
                  oracle_encoder_sym: torch.nn.Module,
                  oracle_decoder_sym: torch.nn.Module,
                  oracle_generator: torch.tensor,
@@ -83,9 +83,7 @@ class HereditaryGeometryDiscovery():
         self.tasks_frameestimators=tasks_frameestimators
         self.oracle_generator= oracle_generator
         self.encoder_geo=encoder_geo
-        self.decoder_geo=decoder_geo
         self.encoder_sym=encoder_sym
-        self.decoder_sym=decoder_sym
         self.task_specifications=task_specifications
         self.base_task_index=0
         self._log_wandb_every=500
@@ -116,6 +114,8 @@ class HereditaryGeometryDiscovery():
         self._save_dir=save_dir
         self._oracle_encoder_sym= oracle_encoder_sym
         self._oracle_decoder_sym= oracle_decoder_sym
+        self._oracle_encoder_geo= oracle_encoder_geo
+        self._oracle_decoder_geo= oracle_decoder_geo
 
         self._validate_inputs()
 
@@ -135,16 +135,20 @@ class HereditaryGeometryDiscovery():
 
         self._losses["generator_span"]= [0.0]
         self._losses["generator_weights"]= [0.0]
+        self._losses["reconstruction_geo"]= [0.0]
         self._losses["generator_reg"] = [0.0]
         
         self._losses["symmetry"]= [0.0]
-        self._losses["reconstruction"]= [0.0]
+        self._losses["reconstruction_sym"]= [0.0]
         self._losses["symmetry_reg"] = [0.0]
 
         self._diagnostics["cond_num_generator"] = [0.0]
         self._diagnostics["frob_norm_generator"] = [0.0]
-        self._diagnostics["encoder_loss_oracle"] = [0.0] if self._oracle_encoder_sym is not None else None
-        self._diagnostics["decoder_loss_oracle"] = [0.0] if self._oracle_decoder_sym is not None else None
+        self._diagnostics["encoder_loss_oracle_geo"] = [0.0] if self._oracle_encoder_geo is not None else None
+        self._diagnostics["decoder_loss_oracle_geo"] = [0.0] if self._oracle_decoder_geo is not None else None
+        self._diagnostics["encoder_loss_oracle_sym"] = [0.0] if self._oracle_encoder_sym is not None else None
+        self._diagnostics["decoder_loss_oracle_sym"] = [0.0] if self._oracle_decoder_sym is not None else None
+
         
 
         # Optimization variables
@@ -201,11 +205,23 @@ class HereditaryGeometryDiscovery():
         self.task_losses = mean_ortho_comp(ortho_frame_i_lg_ps) + mean_ortho_comp(ortho_lgs_frame_ps)
         self.task_losses_reg = self._lasso_coef_lgs*torch.norm(log_lgs.param, p=1, dim=(-1)).mean(-1).mean(-1)
 
+        loss_reconstruction_geo= torch.linalg.vector_norm(ps - decoder_geo(encoder_geo(ps)), dim=-1).mean()
         if track_loss:
             self._losses["left_actions_tasks"].append(self.task_losses.detach().cpu().numpy())
             self._losses["left_actions_tasks_reg"].append(self.task_losses_reg.detach().cpu().numpy())
             self._losses["left_actions"].append(self.task_losses.mean().detach().cpu().numpy())
-        return self.task_losses.mean() + self.task_losses_reg
+            self._losses["reconstruction_geo"].append(loss_reconstruction_geo.detach().cpu().numpy())
+
+        # Compare the current encoder to an oracle encoder, only used for debugging.
+        if self._oracle_encoder_geo is not None and self._oracle_decoder_geo is not None:
+            with torch.no_grad():
+                encoder_loss_oracle_geo = torch.norm(self._oracle_encoder_geo(ps) - encoder_geo(ps), dim=-1).sum(0)
+                decoder_loss_oracle_geo = torch.norm(self._oracle_decoder_geo(ps) - decoder_geo(ps), dim=-1).sum(0)
+            if track_loss:
+                self._diagnostics["encoder_loss_oracle_geo"].append(encoder_loss_oracle_geo.detach().cpu().numpy())
+                self._diagnostics["decoder_loss_oracle_geo"].append(decoder_loss_oracle_geo.detach().cpu().numpy())
+
+        return self.task_losses.mean() + loss_reconstruction_geo + self.task_losses_reg
     
 
     def evaluate_generator_span(self, 
@@ -298,30 +314,30 @@ class HereditaryGeometryDiscovery():
             _, gen_into_frame = self._project_onto_vector_subspace(gen_ps, frame_ps)
 
             loss_symmetry= torch.linalg.vector_norm(gen_into_frame, dim=-1).mean(-1).mean()
-            loss_reconstruction= torch.linalg.vector_norm(ps - decoder_sym(encoder_sym(ps)), dim=-1).mean()
+            loss_reconstruction_sym= torch.linalg.vector_norm(ps - decoder_sym(encoder_sym(ps)), dim=-1).mean()
             loss_reg = self._lasso_coef_encoder_decoder * (self._l1_penalty(encoder_sym) + self._l1_penalty(decoder_sym))
 
         else:
             loss_symmetry = torch.tensor(0.0, requires_grad=False)
-            loss_reconstruction = torch.tensor(0.0, requires_grad=False)
+            loss_reconstruction_sym = torch.tensor(0.0, requires_grad=False)
             loss_reg = torch.tensor(0.0, requires_grad=False)
 
         # Compare the current encoder to an oracle encoder, only used for debugging.
         if self._oracle_encoder_sym is not None and self._oracle_decoder_sym is not None:
             with torch.no_grad():
-                encoder_loss_oracle = torch.norm(self._oracle_encoder_sym(ps) - encoder_sym(ps), dim=-1).sum(0)
-                decoder_loss_oracle = torch.norm(self._oracle_decoder_sym(ps) - decoder_sym(ps), dim=-1).sum(0)
+                encoder_loss_oracle_sym = torch.norm(self._oracle_encoder_sym(ps) - encoder_sym(ps), dim=-1).sum(0)
+                decoder_loss_oracle_sym = torch.norm(self._oracle_decoder_sym(ps) - decoder_sym(ps), dim=-1).sum(0)
             if track_loss:
-                self._diagnostics["encoder_loss_oracle"].append(encoder_loss_oracle.detach().cpu().numpy())
-                self._diagnostics["decoder_loss_oracle"].append(decoder_loss_oracle.detach().cpu().numpy())
+                self._diagnostics["encoder_loss_oracle_sym"].append(encoder_loss_oracle_sym.detach().cpu().numpy())
+                self._diagnostics["decoder_loss_oracle_sym"].append(decoder_loss_oracle_sym.detach().cpu().numpy())
 
         if track_loss:
             self._losses["symmetry"].append(loss_symmetry.detach().cpu().numpy())
-            self._losses["reconstruction"].append(loss_reconstruction.detach().cpu().numpy())
+            self._losses["reconstruction_sym"].append(loss_reconstruction_sym.detach().cpu().numpy())
             self._losses["symmetry_reg"].append(loss_reg.detach().cpu().numpy())
 
 
-        return loss_symmetry+loss_reconstruction+loss_reg
+        return loss_symmetry+loss_reconstruction_sym+loss_reg
     
 
     def _l1_penalty(self, model):
@@ -383,12 +399,15 @@ class HereditaryGeometryDiscovery():
         for p in self.generator.parameters(): p.requires_grad = True
         for p in self.encoder_geo.parameters(): p.requires_grad = False
         for p in self.decoder_geo.parameters(): p.requires_grad = False
-        for p in self.encoder_sym.parameters(): p.requires_grad = False
+        for p in self.encoder_sym.parameters(): p.requires_grad = False #TODO, take this line and the next one out.
         for p in self.decoder_sym.parameters(): p.requires_grad = False
 
         # 1. Step left-actions, left-action loss is independent of generator.
         self.optimizer_lgs.zero_grad()        
-        loss_left_action = self.evaluate_left_actions(ps=ps, log_lgs=self.log_lgs, encoder=self.encoder_geo, decoder=self.decoder_geo)
+        loss_left_action = self.evaluate_left_actions(ps=ps, 
+                                                      log_lgs=self.log_lgs, 
+                                                      encoder_geo=self.encoder_geo, 
+                                                      decoder_geo=self.decoder_geo)
         loss_left_action.backward()
         self.optimizer_lgs.step()
 
@@ -425,13 +444,15 @@ class HereditaryGeometryDiscovery():
         for p in self.encoder_geo.parameters(): p.requires_grad = True
         for p in self.decoder_geo.parameters(): p.requires_grad = True
 
-        self.optimizer_chart_geo.zero_grad()
-        loss_left_action = self.evaluate_left_actions(ps=ps, 
+        self.optim_encoder_geo.zero_grad()
+        self.optim_decoder_geo.zero_grad()
+        loss_left_action = self.evaluate_left_actions(ps=ps,
                                                       log_lgs=self.log_lgs, 
-                                                      encoder=self.encoder_geo, 
-                                                      decoder=self.decoder_geo)
+                                                      encoder_geo=self.encoder_geo, 
+                                                      decoder_geo=self.decoder_geo)
         loss_left_action.backward()
-        self.optimizer_chart_geo.zero_grad()
+        self.optim_encoder_geo.step()
+        self.optim_decoder_geo.step()
     
 
     def take_step_chart_sym(self):
@@ -443,7 +464,8 @@ class HereditaryGeometryDiscovery():
         # We generally won't expect the chart to generalize to new parts of the state/ action spaces as we can't reliably train it there.
         ps = self.tasks_ps[self.base_task_index][torch.randint(0, self._n_samples, (self.batch_size,))]
 
-        self.optimizer_chart_sym.zero_grad()
+        self.optim_encoder_sym.zero_grad()
+        self.optim_decoder_sym.zero_grad()
         loss_symmetry = self.evaluate_symmetry(ps=ps, 
                                                generator=self.generator.param, 
                                                encoder_geo=self.encoder_geo, 
@@ -452,7 +474,8 @@ class HereditaryGeometryDiscovery():
                                                decoder_sym=self.decoder_sym,
                                                eval_sym_in_follower=True)
         loss_symmetry.backward()            
-        self.optimizer_chart_sym.step()
+        self.optim_encoder_sym.step()
+        self.optim_decoder_sym.step()
 
 
     def optimize(self, 
@@ -481,7 +504,7 @@ class HereditaryGeometryDiscovery():
                     time.sleep(0.05)
 
                 if idx%self._save_every == 0 and self._save_dir is not None:
-                    os.mkdir(f"{self._save_dir}/geo/step_{idx}") if not os.path.exists(f"{self._save_dir}/geo/step_{idx}") else None
+                    os.makedirs(f"{self._save_dir}/geo/step_{idx}") if not os.path.exists(f"{self._save_dir}/geo/step_{idx}") else None
                     self.save(f"{self._save_dir}/geo/step_{idx}/results.pt")
 
         logging.info("Finished learning log left actions, generator and chart.")
@@ -505,7 +528,7 @@ class HereditaryGeometryDiscovery():
                 time.sleep(0.05)
 
             if idx%self._save_every == 0 and self._save_dir is not None:
-                os.mkdir(f"{self._save_dir}/sym/step_{idx}") if not os.path.exists(f"{self._save_dir}/sym/step_{idx}") else None
+                os.makedirs(f"{self._save_dir}/sym/step_{idx}") if not os.path.exists(f"{self._save_dir}/sym/step_{idx}") else None
                 self.save(f"{self._save_dir}/sym/step_{idx}/results.pt")
 
 
@@ -571,21 +594,26 @@ class HereditaryGeometryDiscovery():
             "train/left_actions/mean": float(self._losses['left_actions'][-1]),
             "train/regularizers/left_actions/lasso": float(self._losses['left_actions_tasks_reg'][-1]),
 
-            "train/generator_span": float(self._losses['generator_span'][-1]),
-            "train/generator_weights": float(self._losses['generator_weights'][-1]),
+            "train/geometry/generator_span": float(self._losses['generator_span'][-1]),
+            "train/geometry/generator_weights": float(self._losses['generator_weights'][-1]),
             "train/regularizers/generator/lasso": float(self._losses['generator_reg'][-1]),
+            "train/geometry/reconstruction": float(self._losses['reconstruction_geo'][-1]),
 
             "train/symmetry/span": float(self._losses['symmetry'][-1]),
-            "train/symmetry/reconstruction": float(self._losses['reconstruction'][-1]),
+            "train/symmetry/reconstruction": float(self._losses['reconstruction_sym'][-1]),
             "train/regularizers/symmetry": float(self._losses['symmetry_reg'][-1]),
 
             "diagnostics/cond_num_generator": float(self._diagnostics['cond_num_generator'][-1]),
             "diagnostics/frob_norm_generator": float(self._diagnostics['frob_norm_generator'][-1]),
         }
 
-        if self._diagnostics["encoder_loss_oracle"] is not None and self._diagnostics["decoder_loss_oracle"] is not None:
-            metrics["diagnostics/encoder_loss_oracle"] = float(self._diagnostics['encoder_loss_oracle'][-1])
-            metrics["diagnostics/decoder_loss_oracle"] = float(self._diagnostics['decoder_loss_oracle'][-1])
+        if self._diagnostics["encoder_loss_oracle_sym"] is not None and self._diagnostics["decoder_loss_oracle_sym"] is not None:
+            metrics["diagnostics/encoder_loss_oracle_sym"] = float(self._diagnostics['encoder_loss_oracle_sym'][-1])
+            metrics["diagnostics/decoder_loss_oracle_sym"] = float(self._diagnostics['decoder_loss_oracle_sym'][-1])
+
+        if self._diagnostics["encoder_loss_oracle_geo"] is not None and self._diagnostics["decoder_loss_oracle_geo"] is not None:
+            metrics["diagnostics/encoder_loss_oracle_geo"] = float(self._diagnostics['encoder_loss_oracle_geo'][-1])
+            metrics["diagnostics/decoder_loss_oracle_geo"] = float(self._diagnostics['decoder_loss_oracle_geo'][-1])
 
         task_losses= self._losses['left_actions_tasks'][-1]
         for idx_task in range(self._n_tasks-1):
@@ -622,7 +650,7 @@ class HereditaryGeometryDiscovery():
             "left_actions_tasks_reg": np.array(self._losses["left_actions_tasks_reg"][1:]),
             "generator": np.array(self._losses["generator_span"][1:]),
             "symmetry": np.array(self._losses["symmetry"][1:]),
-            "reconstruction": np.array(self._losses["reconstruction"][1:]),
+            "reconstruction_sym": np.array(self._losses["reconstruction_sym"][1:]),
             "symmetry_reg": np.array(self._losses["symmetry_reg"][1:]),
         }
 
@@ -668,5 +696,7 @@ class HereditaryGeometryDiscovery():
         self.decoder_sym = copy.deepcopy(_identity_chart)
         del _identity_chart
 
-        self.optimizer_chart_geo = torch.optim.Adam([self.encoder_geo.parameters(), self.decoder_geo.parameters()], lr=self._lr_chart)
-        self.optimizer_chart_sym = torch.optim.Adam([self.encoder_geo.parameters(), self.decoder_sym.parameters()], lr=self._lr_chart)
+        self.optim_encoder_geo = torch.optim.Adam(self.encoder_geo.parameters(), lr=self._lr_chart)
+        self.optim_decoder_geo = torch.optim.Adam(self.decoder_geo.parameters(), lr=self._lr_chart)
+        self.optim_encoder_sym = torch.optim.Adam(self.encoder_sym.parameters(), lr=self._lr_chart)
+        self.optim_decoder_sym = torch.optim.Adam(self.decoder_sym.parameters(), lr=self._lr_chart)
