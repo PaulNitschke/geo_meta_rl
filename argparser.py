@@ -5,10 +5,10 @@ def get_argparser():
     
     # Main parameters.
     parser.add_argument("--kernel_dim", type=int, default=1, help="Dimension of the kernel")
-    parser.add_argument("--n_steps_pretrain_geo", type=int, default=10_000, help="Number of pretraining steps for geometry discovery")
     parser.add_argument("--update_chart_every_n_steps", type=int, default=150, help="Update chart every n steps")
     parser.add_argument("--eval_span_how", type=str, choices=["weights", "ortho_comp"], default="weights", help="How to evaluate span")
-    parser.add_argument("--n_steps", type=int, default=1_000_000, help="Number of optimization steps")
+    parser.add_argument("--n_steps_geo", type=int, default=10_000, help="Number of optimization steps for the hereditary geometry discovery.")
+    parser.add_argument("--n_steps_sym", type=int, default=10_000, help="Number of optimization steps for the symmetry discovery.")
     parser.add_argument("--log_lg_inits_how", type=str, choices=["log_linreg", "random"], default="log_linreg", help="Initialization method of the log-left actions.")
     
     # General optimization parameters: Batch size, learning rates, lasso coefficients.
