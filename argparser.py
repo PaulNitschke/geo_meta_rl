@@ -8,7 +8,7 @@ def get_argparser():
     parser.add_argument("--n_steps_pretrain_geo", type=int, default=10_000, help="Number of pretraining steps for geometry discovery")
     parser.add_argument("--update_chart_every_n_steps", type=int, default=150, help="Update chart every n steps")
     parser.add_argument("--eval_span_how", type=str, choices=["weights", "ortho_comp"], default="weights", help="How to evaluate span")
-    parser.add_argument("--n_steps", type=int, default=100_000, help="Number of optimization steps")
+    parser.add_argument("--n_steps", type=int, default=1_000_000, help="Number of optimization steps")
     parser.add_argument("--log_lg_inits_how", type=str, choices=["log_linreg", "random"], default="log_linreg", help="Initialization method of the log-left actions.")
     
     # General optimization parameters: Batch size, learning rates, lasso coefficients.
@@ -19,12 +19,14 @@ def get_argparser():
     parser.add_argument("--lasso_coef_lgs", type=float, default=0.5, help="Lasso coefficient for the log-left actions.")
     parser.add_argument("--lasso_coef_generator", type=float, default=0.005, help="Lasso coefficient for the generator.")
     parser.add_argument("--lasso_coef_encoder_decoder", type=float, default=0.005, help="Lasso coefficient for the encoder and decoder.")
+    parser.add_argument("--n_epochs_pretrain_log_lgs", type=int, default=2_500, help="Number of epochs to initialize the log left actions for.")
+    parser.add_argument("--n_epochs_init_neural_nets", type=int, default=10_000, help="Number of epochs to initialize encoder and decoder to identity.")
 
     # Util parameters.
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--bandwidth", type=float, default=None, help="Bandwidth for the kernel") #TODO, need to take this out.
     parser.add_argument("--log_wandb", type=str2bool, default="true", help="Whether to log results to Weights & Biases.")
-    parser.add_argument("--log_wandb_gradients", type=str2bool, default="true", help="Whether to log results network gradients to Weights & Biases.")
+    parser.add_argument("--log_wandb_gradients", type=str2bool, default="false", help="Whether to log network gradients to Weights & Biases.")
     parser.add_argument("--save_every", type=int, default=10_000, help="Checkpoint frequency.")
 
     # Debugging parameters.

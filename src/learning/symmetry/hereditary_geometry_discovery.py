@@ -2,6 +2,8 @@ import os
 import logging
 from typing import Literal, List, Tuple, Optional
 import time
+import pdb
+
 
 from tqdm import tqdm
 import numpy as np
@@ -34,6 +36,8 @@ class HereditaryGeometryDiscovery():
                  lasso_coef_lgs: Optional[float],
                  lasso_coef_generator: Optional[float],
                  lasso_coef_encoder_decoder: Optional[float],
+                 n_epochs_pretrain_log_lgs: int,
+                 n_epochs_init_neural_nets: int,
 
                  seed:int,
                  bandwidth:float,
@@ -81,7 +85,10 @@ class HereditaryGeometryDiscovery():
         self.decoder=decoder
         self.task_specifications=task_specifications
         self.base_task_index=0
-        self._log_wandb_every=1000
+        self._log_wandb_every=500
+        self._global_step_wandb=0
+        self._n_epochs_pretrain_log_lgs=n_epochs_pretrain_log_lgs
+        self._n_epochs_init_neural_nets=n_epochs_init_neural_nets
 
         self.kernel_dim=kernel_dim
         self._n_steps_pretrain_geo=n_steps_pretrain_geo
@@ -140,7 +147,7 @@ class HereditaryGeometryDiscovery():
 
         # Optimization variables
         torch.manual_seed(seed)
-        self._init_optimization()
+
     
     def evaluate_left_actions(self, 
                              ps: torch.Tensor, 
@@ -151,9 +158,20 @@ class HereditaryGeometryDiscovery():
         """Computes kernel alignment loss of all left-actions."""
         # 1. Push-forward
         lgs=torch.linalg.matrix_exp(log_lgs.param)
-        tilde_ps=encoder(ps)
-        lg_tilde_ps = torch.einsum("Nmn,bn->Nbm", lgs, tilde_ps)
-        lg_ps = decoder(lg_tilde_ps)
+
+        def encoded_left_action(ps):
+            #TODO, this is currently only for 1-D lie groups, the computed jacobian is of shape (b,N,m,n).
+            """Lets the exponential of the log-left action act on ps, represented in the current chart."""
+            # tilde_ps=encoder(ps)
+            tilde_ps = ps
+            lg_tilde_ps = torch.einsum("Nmn,n->Nm", lgs, tilde_ps) #batch-dimension of ps is dropped here as vmap processes the tensors one-by-one.
+            # return decoder(lg_tilde_ps)
+            return lg_tilde_ps
+
+        # tilde_ps=encoder(ps)
+        # lg_tilde_ps = torch.einsum("Nmn,bn->Nbm", lgs, tilde_ps)
+        lg_ps = torch.einsum("Nmn,bn->Nbm", lgs, ps)
+        # lg_ps = decoder(lg_tilde_ps)
 
         # 2. Sample tangent vectors and push-forward tangent vectors
         if not self._use_oracle_rotation_kernel:
@@ -169,7 +187,9 @@ class HereditaryGeometryDiscovery():
             frames_i_lg_ps = torch.stack([
                 self.rotation_vector_field(lg_ps[i], center=goals[i])
                 for i in range(lg_ps.shape[0])], dim=0)
-        lgs_frame_ps = torch.einsum("Nmn,bdn->Nbdm", lgs, frame_ps)
+        
+        jac_lgs = self.compute_vec_jacobian(encoded_left_action, ps)
+        lgs_frame_ps = torch.einsum("bNmn,bdn->Nbdm", jac_lgs, frame_ps) # F-related, cf. Section "Vector Fields and Smooth Maps" in Smooth Manifolds by Lee.
 
 
         # 3. Compute orthogonal complement and projection loss.
@@ -219,8 +239,25 @@ class HereditaryGeometryDiscovery():
             self._losses["generator_reg"].append(loss_reg.detach().cpu().numpy())
 
         return loss
+    
+    def compute_vec_jacobian(self, f: callable, s: torch.tensor)->torch.tensor:
+        """
+        Compute a vectorized Jacobian of function f: n -> m over a batch of states s.
+        Input: tensor s of shape (b,n) where b is a batch dimension and n is the dimension of the data.
+        Returns: tensor of shape (b,n,n)
+        """
+        return torch.vmap(torch.func.jacrev(f))(s)
 
     
+    def compute_vec_vec_jacobian(self, f: callable, s: torch.tensor)->torch.tensor:
+        """
+        Compute a vectorized Jacobian of function f: n -> m over a batch of states s.
+        Input: tensor s of shape (b,d,n) where both b and d are batch dimensions and n is the dimension of the data.
+        Returns: tensor of shape (b,d,n,m)
+        """
+        return torch.vmap(torch.vmap(torch.func.jacrev(f)))(s)
+
+
     def evaluate_symmetry(self, 
                          ps: torch.Tensor, 
                          generator:torch.Tensor,
@@ -234,18 +271,12 @@ class HereditaryGeometryDiscovery():
         """
 
         if eval_sym_in_follower:
-            def compute_vec_jacobian(f: callable, s: torch.tensor)->torch.tensor:
-                """
-                Compute a vectorized Jacobian of function f: n -> m over a batch of states s.
-                Input: tensor s of shape (b,d,n) where both b and d are batch dimensions and n is the dimension of the data.
-                Returns: tensor of shape (b,d,n,m)
-                """
-                return torch.vmap(torch.vmap(torch.func.jacrev(f)))(s)
+
 
             # Let the generator act on the points in latent space.
             tilde_ps=encoder(ps)
             gen_tilde_ps = torch.einsum("dnm,bm->bdn", generator, tilde_ps)
-            jac_decoder=compute_vec_jacobian(decoder, gen_tilde_ps)
+            jac_decoder=self.compute_vec_vec_jacobian(decoder, gen_tilde_ps)
             gen_ps = torch.einsum("bdmn, bdn->bdm", jac_decoder, gen_tilde_ps)
 
             # Check symmetry, need to evaluate frame at base points.
@@ -335,7 +366,7 @@ class HereditaryGeometryDiscovery():
         
     def take_step_geometry(self):
         """Update the geometry variables under a frozen chart."""
-        ps = self.tasks_ps[self.base_task_index][torch.randint(0, self._n_samples, (self.batch_size,))]
+        ps = self.tasks_ps[self.base_task_index][torch.randint(0, self._n_samples, (self.batch_size,))] #TODO, think about which points to use here.
 
         for p in self.log_lgs.parameters(): p.requires_grad = True
         for p in self.generator.parameters(): p.requires_grad = True
@@ -362,7 +393,7 @@ class HereditaryGeometryDiscovery():
 
     def take_step_chart(self):
         """Update the chart under frozen geometry variables."""
-        ps = self.tasks_ps[self.base_task_index][torch.randint(0, self._n_samples, (self.batch_size,))]
+        ps = self.tasks_ps[self.base_task_index][torch.randint(0, self._n_samples, (self.batch_size,))] #TODO, probably need to sample from all tasks for this to globally train encoder/ decoder.
 
         for p in self.log_lgs.parameters(): p.requires_grad = False
         for p in self.generator.parameters(): p.requires_grad = False
@@ -387,15 +418,25 @@ class HereditaryGeometryDiscovery():
         self.progress_bar_pretrain = tqdm(range(self._n_steps_pretrain_geo), desc="Pretrain left actions and generator.")
         self.progress_bar = tqdm(range(n_steps), desc="Hereditary Symmetry Discovery")
 
+        # 1. Initialize left-actions, encoder and decoder.
+        self._init_optimization()
 
+        # 2. Pre-train left-actions and generator.
         if self.oracle_generator is None:
             for idx in self.progress_bar_pretrain:
                 self.take_step_geometry()
 
                 if idx % self._log_wandb_every == 0:
-                    self._log_to_wandb(step=idx)
+                    self._log_to_wandb(step=self._global_step_wandb)
+                    self._global_step_wandb+=self._log_wandb_every
                     time.sleep(0.05)
 
+                if idx%self._save_every == 0 and self._save_dir is not None:
+                    os.mkdir(f"{self._save_dir}/pretrain/step_{idx}") if not os.path.exists(f"{self._save_dir}/pretrain/step_{idx}") else None
+                    self.save(f"{self._save_dir}/pretrain/step_{idx}/hereditary_geometry_discovery.pt")
+
+        # 3. Main optimization loop.
+        logging.info(f"Saving model every {self._save_every} steps.")
         for idx in self.progress_bar:
             
             if idx % self._update_chart_every_n_steps != 0:
@@ -404,13 +445,13 @@ class HereditaryGeometryDiscovery():
                 self.take_step_chart()
             
             if idx % self._log_wandb_every == 0:
-                self._log_to_wandb(step=idx)
+                self._log_to_wandb(step=self._global_step_wandb)
+                self._global_step_wandb+=self._log_wandb_every
                 time.sleep(0.05)
 
-            if idx%self._save_every == 0:
+            if idx%self._save_every == 0 and self._save_dir is not None:
                 os.mkdir(f"{self._save_dir}/step_{idx}") if not os.path.exists(f"{self._save_dir}/step_{idx}") else None
                 self.save(f"{self._save_dir}/step_{idx}/hereditary_geometry_discovery.pt")
-                logging.info(f"Saved model at step {idx}.")
 
 
     def save(self, path: str):
@@ -433,7 +474,9 @@ class HereditaryGeometryDiscovery():
 
         _generator=torch.tensor([[0, -1], [1,0]], requires_grad=False, dtype=torch.float32).unsqueeze(0)
         projected_state = p_batch-center
-        return torch.einsum("dmn, bn->bdm", _generator, projected_state)
+        gradients = torch.einsum("dmn, bn->bdm", _generator, projected_state)
+        norm_gradients = gradients.norm(dim=-1, keepdim=True)
+        return gradients/norm_gradients
     
 
     def _validate_inputs(self):
@@ -443,15 +486,16 @@ class HereditaryGeometryDiscovery():
         logging.info("Using oracle generator") if self.oracle_generator is not None else None
 
 
-    def _init_log_lgs_linear_reg(self, epochs=10000, log_wandb:bool=False):
+    def _init_log_lgs_linear_reg(self, epochs, log_wandb:bool=False):
         """Fits log-linear regressors to initialize left actions."""
         logging.info("Fitting log-linear regressors to initialize left actions.")
         self._log_lg_inits = [
-            ExponentialLinearRegressor(input_dim=self.ambient_dim, seed=self.seed, log_wandb=log_wandb).fit(
-                X=self.tasks_ps[0], Y=self.tasks_ps[idx_task], epochs=epochs, idx_task=idx_task
+            ExponentialLinearRegressor(input_dim=self.ambient_dim, seed=self.seed, log_wandb=log_wandb, task_idx=idx_task).fit(
+                X=self.tasks_ps[0], Y=self.tasks_ps[idx_task], epochs=epochs
             )
             for idx_task in self.task_idxs]
-        logging.info("Finished fitting log-linear regressors to initialize left actions.")       
+        logging.info("Finished fitting log-linear regressors to initialize left actions.")   
+        self._global_step_wandb+=len(self.task_idxs)*self._n_epochs_pretrain_log_lgs    
         return torch.stack(self._log_lg_inits, dim=0)
     
 
@@ -537,10 +581,7 @@ class HereditaryGeometryDiscovery():
 
 
         if self._log_lg_inits_how == 'log_linreg':
-            self._log_lg_inits=self._init_log_lgs_linear_reg(log_wandb=self._log_wandb, 
-                                                             epochs=2_500,
-                                                            #  epochs=1
-                                                             )
+            self._log_lg_inits=self._init_log_lgs_linear_reg(log_wandb=self._log_wandb,epochs=self._n_epochs_pretrain_log_lgs)
 
         elif self._log_lg_inits_how == 'random':
             self._log_lg_inits = torch.randn(size=(self._n_tasks-1, self.ambient_dim, self.ambient_dim))
@@ -557,10 +598,9 @@ class HereditaryGeometryDiscovery():
             self.optimizer_weights_lgs_to_gen= torch.optim.Adam(self.weights_lgs_to_gen.parameters(), lr=self._lr_gen)
 
         self.encoder= identity_init_neural_net(self.encoder, tasks_ps=self.tasks_ps, name="encoder", log_wandb=self._log_wandb, 
-                                            #    n_steps=1
-                                               )
+                                               n_steps=self._n_epochs_init_neural_nets) #TODO, only do this once and then do deepcopy.
         self.decoder= identity_init_neural_net(self.decoder, tasks_ps=self.tasks_ps, name="decoder", log_wandb=self._log_wandb,
-                                            #    n_steps=1
-                                               )
+                                               n_steps=self._n_epochs_init_neural_nets)
+        self._global_step_wandb+=2*self._n_epochs_init_neural_nets
         self.optimizer_encoder=torch.optim.Adam(self.encoder.parameters(), lr=self._lr_chart)
         self.optimizer_decoder=torch.optim.Adam(self.decoder.parameters(), lr=self._lr_chart)

@@ -51,6 +51,7 @@ def train(parser):
     run_name = _run_name + '_' + datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     save_dir=f"data/local/experiment/circle_rotation/{run_name}"
     os.mkdir(save_dir)
+    os.mkdir(save_dir + "/pretrain")
 
     if args.log_wandb:
         WAND_PROJECT_NAME="circle_hereditary_geometry_discovery"
@@ -68,7 +69,8 @@ def train(parser):
                                             batch_size=args.batch_size, 
                                             lr_lgs=args.lr_lgs,lr_gen=args.lr_gen,lr_chart=args.lr_chart,
                                             lasso_coef_lgs=args.lasso_coef_lgs, lasso_coef_generator=args.lasso_coef_generator, lasso_coef_encoder_decoder=args.lasso_coef_encoder_decoder,
-                                            
+                                            n_epochs_pretrain_log_lgs= args.n_epochs_pretrain_log_lgs, n_epochs_init_neural_nets= args.n_epochs_init_neural_nets,
+
                                             seed=args.seed, log_wandb=args.log_wandb, log_wandb_gradients=args.log_wandb_gradients, save_every=args.save_every,
                                             bandwidth=args.bandwidth,
 
