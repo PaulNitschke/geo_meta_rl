@@ -282,7 +282,6 @@ class HereditaryGeometryDiscovery():
                          decoder_geo:torch.nn.Module,
                          encoder_sym:torch.nn.Module,
                          decoder_sym:torch.nn.Module,
-                         eval_sym_in_follower:bool,
                          track_loss: bool=True)->float:
         """
         Evaluates whether the generator is contained within the kernel distribution of the base task (expressed in symmetry and geometry charts).
@@ -294,33 +293,26 @@ class HereditaryGeometryDiscovery():
         - encoder_sym, decoder_sym, as these are used to represent the symmetry.
         """
 
-        if eval_sym_in_follower:
+        # Let the generator act on the points in latent space. First encode via symmetry space and then via geometry space.
+        tilde_ps=encoder_geo(encoder_sym(ps))
+        gen_tilde_tilde_ps = torch.einsum("dnm,bm->bdn", generator, tilde_ps)
+        jac_decoder_geo=self.compute_vec_vec_jacobian(decoder_geo, gen_tilde_tilde_ps)
+        gen_tilde_ps = torch.einsum("bdmn, bdn->bdm", jac_decoder_geo, gen_tilde_tilde_ps)
+        jac_decoder_sym=self.compute_vec_vec_jacobian(decoder_sym, gen_tilde_ps)
+        gen_ps = torch.einsum("bdmn, bdn->bdm", jac_decoder_sym, gen_tilde_ps)
 
+        # Check symmetry, need to evaluate frame at base points.
+        #TODO, using ground truth kernel distribution.
+        goal_base = self.task_specifications[self.base_task_index]['goal']
+        frame_ps= self.rotation_vector_field(ps, center=goal_base)
+        frame_ps=frame_ps.unsqueeze(0)
 
-            # Let the generator act on the points in latent space. First encode via symmetry space and then via geometry space.
-            tilde_ps=encoder_geo(encoder_sym(ps))
-            gen_tilde_tilde_ps = torch.einsum("dnm,bm->bdn", generator, tilde_ps)
-            jac_decoder_geo=self.compute_vec_vec_jacobian(decoder_geo, gen_tilde_tilde_ps)
-            gen_tilde_ps = torch.einsum("bdmn, bdn->bdm", jac_decoder_geo, gen_tilde_tilde_ps)
-            jac_decoder_sym=self.compute_vec_vec_jacobian(decoder_sym, gen_tilde_ps)
-            gen_ps = torch.einsum("bdmn, bdn->bdm", jac_decoder_sym, gen_tilde_ps)
+        _, gen_into_frame = self._project_onto_vector_subspace(gen_ps, frame_ps)
 
-            # Check symmetry, need to evaluate frame at base points.
-            #TODO, using ground truth kernel distribution.
-            goal_base = self.task_specifications[self.base_task_index]['goal']
-            frame_ps= self.rotation_vector_field(ps, center=goal_base)
-            frame_ps=frame_ps.unsqueeze(0)
+        loss_symmetry= torch.linalg.vector_norm(gen_into_frame, dim=-1).mean(-1).mean()
+        loss_reconstruction_sym= torch.linalg.vector_norm(ps - decoder_sym(encoder_sym(ps)), dim=-1).mean()
+        loss_reg = self._lasso_coef_encoder_decoder * (self._l1_penalty(encoder_sym) + self._l1_penalty(decoder_sym))
 
-            _, gen_into_frame = self._project_onto_vector_subspace(gen_ps, frame_ps)
-
-            loss_symmetry= torch.linalg.vector_norm(gen_into_frame, dim=-1).mean(-1).mean()
-            loss_reconstruction_sym= torch.linalg.vector_norm(ps - decoder_sym(encoder_sym(ps)), dim=-1).mean()
-            loss_reg = self._lasso_coef_encoder_decoder * (self._l1_penalty(encoder_sym) + self._l1_penalty(decoder_sym))
-
-        else:
-            loss_symmetry = torch.tensor(0.0, requires_grad=False)
-            loss_reconstruction_sym = torch.tensor(0.0, requires_grad=False)
-            loss_reg = torch.tensor(0.0, requires_grad=False)
 
         # Compare the current encoder to an oracle encoder, only used for debugging.
         if self._oracle_encoder_sym is not None and self._oracle_decoder_sym is not None:
@@ -419,15 +411,7 @@ class HereditaryGeometryDiscovery():
         loss_span = self.evaluate_generator_span(generator=generator_normed, 
                                                  log_lgs=log_lgs_detach_tensor)
         
-        # TODO, probably need to just take this out altogether.
-        loss_symmetry = self.evaluate_symmetry(ps=ps, 
-                                               generator=generator_normed, 
-                                               encoder_geo=self.encoder_geo, 
-                                               decoder_geo=self.decoder_geo,
-                                               encoder_sym=self.encoder_sym,
-                                               decoder_sym=self.decoder_sym, 
-                                               eval_sym_in_follower=self._eval_sym_in_follower)
-        (loss_span + loss_symmetry).backward() 
+        loss_span.backward() 
         self.optimizer_generator.step()
 
 
@@ -471,8 +455,7 @@ class HereditaryGeometryDiscovery():
                                                encoder_geo=self.encoder_geo, 
                                                decoder_geo=self.decoder_geo,
                                                encoder_sym=self.encoder_sym,
-                                               decoder_sym=self.decoder_sym,
-                                               eval_sym_in_follower=True)
+                                               decoder_sym=self.decoder_sym)                                               )
         loss_symmetry.backward()            
         self.optim_encoder_sym.step()
         self.optim_decoder_sym.step()
@@ -700,3 +683,12 @@ class HereditaryGeometryDiscovery():
         self.optim_decoder_geo = torch.optim.Adam(self.decoder_geo.parameters(), lr=self._lr_chart)
         self.optim_encoder_sym = torch.optim.Adam(self.encoder_sym.parameters(), lr=self._lr_chart)
         self.optim_decoder_sym = torch.optim.Adam(self.decoder_sym.parameters(), lr=self._lr_chart)
+
+
+    def _stack_samples(self):
+        """Stacks samples from all tasks into a single tensor."""
+        _n_samples_per_task, ambient_dim = self.tasks_ps[0].shape
+        ps = torch.empty([self._n_tasks, _n_samples_per_task, ambient_dim], dtype=torch.float32)
+        for i, task_ps in enumerate(self._n_tasks):
+            ps[i] = task_ps
+        self.all_ps=ps.reshape([-1, ambient_dim])
