@@ -383,16 +383,13 @@ class HereditaryGeometryDiscovery():
         return proj, ortho_comp
     
         
-    def take_step_geometry(self):
-        """Update the geometry variables under a frozen chart."""
+    def take_step_left_actions(self):
+        """Update the left actions under a frozen chart."""
         ps = self.tasks_ps[self.base_task_index][torch.randint(0, self._n_samples, (self.batch_size,))] #TODO, think about which points to use here.
 
         for p in self.log_lgs.parameters(): p.requires_grad = True
-        for p in self.generator.parameters(): p.requires_grad = True
         for p in self.encoder_geo.parameters(): p.requires_grad = False
         for p in self.decoder_geo.parameters(): p.requires_grad = False
-        for p in self.encoder_sym.parameters(): p.requires_grad = False #TODO, take this line and the next one out.
-        for p in self.decoder_sym.parameters(): p.requires_grad = False
 
         # 1. Step left-actions, left-action loss is independent of generator.
         self.optimizer_lgs.zero_grad()        
@@ -403,28 +400,12 @@ class HereditaryGeometryDiscovery():
         loss_left_action.backward()
         self.optimizer_lgs.step()
 
-        # 2. Step generator.
-        self.optimizer_generator.zero_grad()
-        log_lgs_detach_tensor = self.log_lgs.param.detach()
-        generator_normed = self.generator.param / torch.linalg.matrix_norm(self.generator.param)
-
-        loss_span = self.evaluate_generator_span(generator=generator_normed, 
-                                                 log_lgs=log_lgs_detach_tensor)
-        
-        loss_span.backward() 
-        self.optimizer_generator.step()
-
 
     def take_step_chart_geo(self):
-        """Update the geometry chart under frozen geometry (log lgs, W) variables. The generator W loss is intrinsic (chart independent)."""
+        """Update the geometry chart under frozen leftactions."""
         ps = self.tasks_ps[self.base_task_index][torch.randint(0, self._n_samples, (self.batch_size,))] #TODO, probably need to sample from all tasks for this to globally train encoder/ decoder.
 
-        # Freeze the geometry variables.
         for p in self.log_lgs.parameters(): p.requires_grad = False
-        for p in self.generator.parameters(): p.requires_grad = False
-
-        # 1. Take a step on the chart for the geometry under a frozen symmetry.
-        # The geometry span loss is intrinsic (independent of the geometry chart), so we do not need to step it here.
         for p in self.encoder_geo.parameters(): p.requires_grad = True
         for p in self.decoder_geo.parameters(): p.requires_grad = True
 
@@ -437,7 +418,19 @@ class HereditaryGeometryDiscovery():
         loss_left_action.backward()
         self.optim_encoder_geo.step()
         self.optim_decoder_geo.step()
-    
+
+
+    def take_step_generator(self):
+        """Steps the generator given the log left actions."""        
+
+        self.optimizer_generator.zero_grad()
+        generator_normed = self.generator.param / torch.linalg.matrix_norm(self.generator.param)
+
+        loss_span = self.evaluate_generator_span(generator=generator_normed, log_lgs=self.log_lgs.param)
+        
+        loss_span.backward() 
+        self.optimizer_generator.step()
+
 
     def take_step_chart_sym(self):
         """
@@ -455,29 +448,39 @@ class HereditaryGeometryDiscovery():
                                                encoder_geo=self.encoder_geo, 
                                                decoder_geo=self.decoder_geo,
                                                encoder_sym=self.encoder_sym,
-                                               decoder_sym=self.decoder_sym)                                               )
+                                               decoder_sym=self.decoder_sym)
         loss_symmetry.backward()            
         self.optim_encoder_sym.step()
         self.optim_decoder_sym.step()
 
 
     def optimize(self, 
-                 n_steps_geo:int,
-                 n_steps_sym: int):
+                 n_steps_lgs:int,
+                 n_steps_gen:int,
+                 n_steps_sym:int):
+        
         """Main optimization loop."""
-        self.progress_bar_geo = tqdm(range(n_steps_geo), desc="Learn geo...")
-        self.progress_bar_sym = tqdm(range(n_steps_sym), desc="Learn sym...")
+        self.progress_bar_lgs = tqdm(range(n_steps_lgs), desc="Learn log left actions...")
+        self.progress_bar_gen = tqdm(range(n_steps_gen), desc="Learn generator...")
+        self.progress_bar_sym = tqdm(range(n_steps_sym), desc="Learn symmetry...")
 
         # 1. Initialize left-actions, encoder and decoder.
         self._init_optimization()
 
-        # 2. Learn a generator and a chart for the geometry.
-        logging.info("Learning log left actions, generator and chart.")
+        # 2. Learn left actions and their chart.
+        logging.info("Learning log left actions and chart.")
+        for p in self.log_lgs.parameters(): p.requires_grad = True
+        for p in self.generator.parameters(): p.requires_grad = False
+        for p in self.encoder_geo.parameters(): p.requires_grad = False
+        for p in self.decoder_geo.parameters(): p.requires_grad = False
+        for p in self.encoder_sym.parameters(): p.requires_grad = False
+        for p in self.decoder_sym.parameters(): p.requires_grad = False
+
         if self.oracle_generator is None:
-            for idx in self.progress_bar_geo:
+            for idx in self.progress_bar_lgs:
 
                 if idx % self._update_chart_every_n_steps != 0:
-                    self.take_step_geometry()
+                    self.take_step_left_actions()
                 else:
                     self.take_step_chart_geo()
 
@@ -490,14 +493,31 @@ class HereditaryGeometryDiscovery():
                     os.makedirs(f"{self._save_dir}/geo/step_{idx}") if not os.path.exists(f"{self._save_dir}/geo/step_{idx}") else None
                     self.save(f"{self._save_dir}/geo/step_{idx}/results.pt")
 
-        logging.info("Finished learning log left actions, generator and chart.")
+        logging.info("Finished learning log left actions and chart.")
 
-        # 3. Symmetry discovery given the hereditary geometry.
-        logging.info("Learning symmetry chart.")
+        # 3. Learn generator.
+        logging.info("Learning generator.")
         for p in self.log_lgs.parameters(): p.requires_grad = False
-        for p in self.generator.parameters(): p.requires_grad = False
         for p in self.encoder_geo.parameters(): p.requires_grad = False
         for p in self.decoder_geo.parameters(): p.requires_grad = False
+        for p in self.generator.parameters(): p.requires_grad = True
+        if self.oracle_generator is None:
+            for idx in self.progress_bar_lgs:
+
+                self.take_step_generator()
+                if idx % self._log_wandb_every == 0:
+                    self._log_to_wandb(step=self._global_step_wandb)
+                    self._global_step_wandb+=self._log_wandb_every
+                    time.sleep(0.05)
+
+                if idx%self._save_every == 0 and self._save_dir is not None:
+                    os.makedirs(f"{self._save_dir}/gen/step_{idx}") if not os.path.exists(f"{self._save_dir}/gen/step_{idx}") else None
+                    self.save(f"{self._save_dir}/gen/step_{idx}/results.pt")
+
+
+        # 4. Symmetry discovery given the hereditary geometry.
+        logging.info("Learning symmetry chart.")
+        for p in self.generator.parameters(): p.requires_grad = False
         for p in self.encoder_sym.parameters(): p.requires_grad = True
         for p in self.decoder_sym.parameters(): p.requires_grad = True
 
