@@ -128,30 +128,18 @@ class HereditaryGeometryDiscovery():
         self.frame_base_task= self.tasks_frameestimators[self.base_task_index]
         self.frame_i_tasks= [self.tasks_frameestimators[i] for i in self.task_idxs]
 
+        # Store losses and diagnostics.
         self._losses, self._diagnostics={}, {}
-        self._losses["left_actions"]= [0.0]
-        self._losses["left_actions_tasks"]= [np.zeros(self._n_tasks-1, dtype=np.float32)]
-        self._losses["left_actions_tasks_reg"]= [0.0]
+        _losses_names=["left_actions","left_actions_tasks_reg",
+                       "generator_span","generator_weights","reconstruction_geo","generator_reg",
+                       "symmetry","reconstruction_sym","symmetry_reg"]
+        _diagnostics_names= ["cond_num_generator", "frob_norm_generator",
+                                "encoder_loss_oracle_geo", "decoder_loss_oracle_geo",
+                                "encoder_loss_oracle_sym", "decoder_loss_oracle_sym"]
+        self._losses = {name: [0.0] for name in _losses_names}
+        self._diagnostics = {name: [0.0] for name in _diagnostics_names}
+        self._losses["left_actions_tasks"] = [np.zeros(self._n_tasks-1, dtype=np.float32)]
 
-        self._losses["generator_span"]= [0.0]
-        self._losses["generator_weights"]= [0.0]
-        self._losses["reconstruction_geo"]= [0.0]
-        self._losses["generator_reg"] = [0.0]
-        
-        self._losses["symmetry"]= [0.0]
-        self._losses["reconstruction_sym"]= [0.0]
-        self._losses["symmetry_reg"] = [0.0]
-
-        self._diagnostics["cond_num_generator"] = [0.0]
-        self._diagnostics["frob_norm_generator"] = [0.0]
-        self._diagnostics["encoder_loss_oracle_geo"] = [0.0] if self._oracle_encoder_geo is not None else None
-        self._diagnostics["decoder_loss_oracle_geo"] = [0.0] if self._oracle_decoder_geo is not None else None
-        self._diagnostics["encoder_loss_oracle_sym"] = [0.0] if self._oracle_encoder_sym is not None else None
-        self._diagnostics["decoder_loss_oracle_sym"] = [0.0] if self._oracle_decoder_sym is not None else None
-
-        
-
-        # Optimization variables
         torch.manual_seed(seed)
 
     
@@ -256,7 +244,8 @@ class HereditaryGeometryDiscovery():
             self._losses["generator_reg"].append(loss_reg.detach().cpu().numpy())
 
         return loss
-    
+
+
     def compute_vec_jacobian(self, f: callable, s: torch.tensor)->torch.tensor:
         """
         Compute a vectorized Jacobian of function f: n -> m over a batch of states s.
@@ -560,13 +549,6 @@ class HereditaryGeometryDiscovery():
         gradients = torch.einsum("dmn, bn->bdm", _generator, projected_state)
         norm_gradients = gradients.norm(dim=-1, keepdim=True)
         return gradients/norm_gradients
-    
-
-    def _validate_inputs(self):
-        """Validates user inputs."""
-        assert self._log_lg_inits_how in ['random', 'log_linreg'], "_log_lg_inits_how must be one of ['random', 'log_linreg']."
-        assert len(self.tasks_ps) == len(self.tasks_frameestimators), "Number of tasks and frame estimators must match."
-        logging.info("Using oracle generator") if self.oracle_generator is not None else None
 
 
     def _init_log_lgs_linear_reg(self, epochs, log_wandb:bool=False):
@@ -580,58 +562,6 @@ class HereditaryGeometryDiscovery():
         logging.info("Finished fitting log-linear regressors to initialize left actions.")   
         self._global_step_wandb+=len(self.task_idxs)*self._n_epochs_pretrain_log_lgs    
         return torch.stack(self._log_lg_inits, dim=0)
-    
-
-    def _log_to_wandb(self, step:int):
-        """Logs losses to weights and biases."""
-        if not self._log_wandb:
-            return
-        
-        def _log_grad_norms(module: torch.nn.Module, prefix: str):
-            """Logs L2 norms of gradients of a PyTorch module to wandb."""
-            for name, param in module.named_parameters():
-                if param.grad is not None:
-                    metrics[f"grad_norms/{prefix}/{name}"] = param.grad.norm().item()
-
-        metrics= {
-            "train/left_actions/mean": float(self._losses['left_actions'][-1]),
-            "train/regularizers/left_actions/lasso": float(self._losses['left_actions_tasks_reg'][-1]),
-
-            "train/geometry/generator_span": float(self._losses['generator_span'][-1]),
-            "train/geometry/generator_weights": float(self._losses['generator_weights'][-1]),
-            "train/regularizers/generator/lasso": float(self._losses['generator_reg'][-1]),
-            "train/geometry/reconstruction": float(self._losses['reconstruction_geo'][-1]),
-
-            "train/symmetry/span": float(self._losses['symmetry'][-1]),
-            "train/symmetry/reconstruction": float(self._losses['reconstruction_sym'][-1]),
-            "train/regularizers/symmetry": float(self._losses['symmetry_reg'][-1]),
-
-            "diagnostics/cond_num_generator": float(self._diagnostics['cond_num_generator'][-1]),
-            "diagnostics/frob_norm_generator": float(self._diagnostics['frob_norm_generator'][-1]),
-        }
-
-        if self._diagnostics["encoder_loss_oracle_sym"] is not None and self._diagnostics["decoder_loss_oracle_sym"] is not None:
-            metrics["diagnostics/encoder_loss_oracle_sym"] = float(self._diagnostics['encoder_loss_oracle_sym'][-1])
-            metrics["diagnostics/decoder_loss_oracle_sym"] = float(self._diagnostics['decoder_loss_oracle_sym'][-1])
-
-        if self._diagnostics["encoder_loss_oracle_geo"] is not None and self._diagnostics["decoder_loss_oracle_geo"] is not None:
-            metrics["diagnostics/encoder_loss_oracle_geo"] = float(self._diagnostics['encoder_loss_oracle_geo'][-1])
-            metrics["diagnostics/decoder_loss_oracle_geo"] = float(self._diagnostics['decoder_loss_oracle_geo'][-1])
-
-        task_losses= self._losses['left_actions_tasks'][-1]
-        for idx_task in range(self._n_tasks-1):
-            metrics[f"train/left_actions/tasks/task_idx={idx_task}"] = float(task_losses[idx_task])
-
-        if self._log_wandb_gradients:
-            _log_grad_norms(self.encoder_geo, "encoder_geo")
-            _log_grad_norms(self.decoder_geo, "decoder_geo")
-            _log_grad_norms(self.encoder_sym, "encoder_sym")
-            _log_grad_norms(self.decoder_sym, "decoder_sym")
-            _log_grad_norms(self.log_lgs, "log_lgs")
-            _log_grad_norms(self.generator, "generator")
-            _log_grad_norms(self.weights_lgs_to_gen, "weights_lgs_to_gen") if self._eval_span_how == "weights" else None
-
-        wandb.log(metrics, step=step)
 
 
     @property
@@ -712,3 +642,62 @@ class HereditaryGeometryDiscovery():
         for i, task_ps in enumerate(self._n_tasks):
             ps[i] = task_ps
         self.all_ps=ps.reshape([-1, ambient_dim])
+
+
+    def _validate_inputs(self):
+        """Validates user inputs."""
+        assert self._log_lg_inits_how in ['random', 'log_linreg'], "_log_lg_inits_how must be one of ['random', 'log_linreg']."
+        assert len(self.tasks_ps) == len(self.tasks_frameestimators), "Number of tasks and frame estimators must match."
+        logging.info("Using oracle generator") if self.oracle_generator is not None else None
+
+        
+    def _log_to_wandb(self, step:int):
+        """Logs losses to weights and biases."""
+        if not self._log_wandb:
+            return
+        
+        def _log_grad_norms(module: torch.nn.Module, prefix: str):
+            """Logs L2 norms of gradients of a PyTorch module to wandb."""
+            for name, param in module.named_parameters():
+                if param.grad is not None:
+                    metrics[f"grad_norms/{prefix}/{name}"] = param.grad.norm().item()
+
+        metrics= {
+            "train/left_actions/mean": float(self._losses['left_actions'][-1]),
+            "train/regularizers/left_actions/lasso": float(self._losses['left_actions_tasks_reg'][-1]),
+
+            "train/geometry/generator_span": float(self._losses['generator_span'][-1]),
+            "train/geometry/generator_weights": float(self._losses['generator_weights'][-1]),
+            "train/regularizers/generator/lasso": float(self._losses['generator_reg'][-1]),
+            "train/geometry/reconstruction": float(self._losses['reconstruction_geo'][-1]),
+
+            "train/symmetry/span": float(self._losses['symmetry'][-1]),
+            "train/symmetry/reconstruction": float(self._losses['reconstruction_sym'][-1]),
+            "train/regularizers/symmetry": float(self._losses['symmetry_reg'][-1]),
+
+            "diagnostics/cond_num_generator": float(self._diagnostics['cond_num_generator'][-1]),
+            "diagnostics/frob_norm_generator": float(self._diagnostics['frob_norm_generator'][-1]),
+        }
+
+        if self._diagnostics["encoder_loss_oracle_sym"] is not None and self._diagnostics["decoder_loss_oracle_sym"] is not None:
+            metrics["diagnostics/encoder_loss_oracle_sym"] = float(self._diagnostics['encoder_loss_oracle_sym'][-1])
+            metrics["diagnostics/decoder_loss_oracle_sym"] = float(self._diagnostics['decoder_loss_oracle_sym'][-1])
+
+        if self._diagnostics["encoder_loss_oracle_geo"] is not None and self._diagnostics["decoder_loss_oracle_geo"] is not None:
+            metrics["diagnostics/encoder_loss_oracle_geo"] = float(self._diagnostics['encoder_loss_oracle_geo'][-1])
+            metrics["diagnostics/decoder_loss_oracle_geo"] = float(self._diagnostics['decoder_loss_oracle_geo'][-1])
+
+        task_losses= self._losses['left_actions_tasks'][-1]
+        for idx_task in range(self._n_tasks-1):
+            metrics[f"train/left_actions/tasks/task_idx={idx_task}"] = float(task_losses[idx_task])
+
+        if self._log_wandb_gradients:
+            _log_grad_norms(self.encoder_geo, "encoder_geo")
+            _log_grad_norms(self.decoder_geo, "decoder_geo")
+            _log_grad_norms(self.encoder_sym, "encoder_sym")
+            _log_grad_norms(self.decoder_sym, "decoder_sym")
+            _log_grad_norms(self.log_lgs, "log_lgs")
+            _log_grad_norms(self.generator, "generator")
+            _log_grad_norms(self.weights_lgs_to_gen, "weights_lgs_to_gen") if self._eval_span_how == "weights" else None
+
+        wandb.log(metrics, step=step)
