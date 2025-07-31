@@ -24,6 +24,8 @@ def get_argparser():
     parser.add_argument("--log_lg_inits_how", type=str, choices=["log_linreg", "random"], default="log_linreg", help="Initialization method of the log-left actions.")
     
     # General optimization parameters: Batch size, learning rates, lasso coefficients.
+    parser.add_argument("--enc_geo_net_sizes", type=list, default=[2,2], help="Network architecture for the encoder of the geometry chart. Same architecture for the decoder.")
+    parser.add_argument("--enc_sym_net_sizes", type=list, default=[2,2], help="Network architecture for the encoder of the symmetry chart. Same architecture for the decoder.")
     parser.add_argument("--batch_size", type=int, default=128, help="Batch size for training")
     parser.add_argument("--lr_lgs", type=float, default=0.00035, help="Learning rate for the left actions.")
     parser.add_argument("--lr_gen", type=float, default=0.00035, help="Learning rate for the generator loss.")

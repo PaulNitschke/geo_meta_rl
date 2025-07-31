@@ -1,55 +1,20 @@
-import pickle
-import os
-import warnings
-
-import numpy as np
 import torch as th
-import gym
-from gym import spaces
-
-from garage import EnvStep
-from garage import StepType
-from .learning.symmetry.kernel_approx import KernelFrameEstimator
-
-class GarageToGymWrapper(gym.Env):
-    """Converts a garage environment into a gym environment which can be used by Stable Baselines."""
-    def __init__(self, task_env):
-        self._env = task_env
-
-        self.action_space = spaces.Box(low=self._env.action_space.low,
-                                       high=self._env.action_space.high,
-                                       dtype=self._env.action_space.dtype)
-        self.observation_space = spaces.Box(low=self._env.observation_space.low,
-                                            high=self._env.observation_space.high,
-                                            dtype=self._env.observation_space.dtype)
-
-    def reset(self):
-        obs, _info = self._env.reset()
-        return obs
-
-    def step(self, action):
-        step: EnvStep = self._env.step(action)
-        obs = step.observation
-        reward = step.reward
-        done = step.step_type in (StepType.TERMINAL, StepType.TIMEOUT)
-        info = step.env_info
-        return obs, reward, done, info
-
-    def render(self, mode="human"):
-        return self._env.render(mode)
-    def seed(self, seed=None):
-        np.random.seed(seed)
-        return [seed]
-
-    def close(self):
-        self._env.close()
-
-
-class Affine2D(th.nn.Module):
-    """An affine neural network."""
-    def __init__(self, input_dim, output_dim):
+    
+class DenseNN(th.nn.Module):
+    """A fully connected neural network with arbitrary layer sizes and ReLU activations."""
+    def __init__(self, layer_sizes: list[int]):
+        """
+        Args:
+            layer_sizes (list of int): List of layer sizes, including input and output dimensions.
+                                       Example: [2, 64, 128, 2]
+        """
         super().__init__()
-        self.linear = th.nn.Linear(input_dim, output_dim, bias=True)
+        layers = []
+        for in_dim, out_dim in zip(layer_sizes[:-1], layer_sizes[1:]):
+            layers.append(th.nn.Linear(in_dim, out_dim))
+            layers.append(th.nn.ReLU()) 
+        layers.pop()
+        self.net = th.nn.Sequential(*layers)
 
     def forward(self, x):
-        return self.linear(x)
+        return self.net(x)

@@ -3,14 +3,14 @@ import logging
 from typing import Literal, List, Tuple, Optional
 import time
 import copy
-
+import warnings
 
 from tqdm import tqdm
 import numpy as np
 import torch
 import wandb
 
-
+from ...utils import DenseNN
 from .initialization import identity_init_neural_net, ExponentialLinearRegressor
 
 
@@ -19,8 +19,8 @@ class HereditaryGeometryDiscovery():
     def __init__(self,
                  tasks_ps: List[torch.tensor],
                  tasks_frameestimators: List[callable],
-                 encoder_geo: torch.nn.Module,
-                 encoder_sym: torch.nn.Module,
+                 enc_geo_net_sizes: list[int],
+                 enc_sym_net_sizes: list[int],
                  eval_sym_in_follower: bool,
 
                  kernel_dim: int,
@@ -44,8 +44,8 @@ class HereditaryGeometryDiscovery():
                  log_wandb_gradients:bool,
                  save_every:int,
                  
-                 task_specifications:list,
-                 use_oracle_rotation_kernel:bool,
+                 use_oracle_frames:bool,
+                 oracle_frames:list[callable],
                  oracle_encoder_geo: torch.nn.Module,
                  oracle_decoder_geo: torch.nn.Module,
                  oracle_encoder_sym: torch.nn.Module,
@@ -82,9 +82,8 @@ class HereditaryGeometryDiscovery():
         self.tasks_ps= tasks_ps
         self.tasks_frameestimators=tasks_frameestimators
         self.oracle_generator= oracle_generator
-        self.encoder_geo=encoder_geo
-        self.encoder_sym=encoder_sym
-        self.task_specifications=task_specifications
+        self.encoder_geo=DenseNN(enc_geo_net_sizes)
+        self.encoder_sym=DenseNN(enc_sym_net_sizes)
         self.base_task_index=0
         self._log_wandb_every=500
         self._n_epochs_pretrain_log_lgs=n_epochs_pretrain_log_lgs
@@ -110,7 +109,8 @@ class HereditaryGeometryDiscovery():
         self._save_every= save_every
         
         self._eval_sym_in_follower = eval_sym_in_follower
-        self._use_oracle_rotation_kernel=use_oracle_rotation_kernel
+        self._use_oracle_frames=use_oracle_frames
+        self._oracle_frames=oracle_frames
         self._save_dir=save_dir
         self._oracle_encoder_sym= oracle_encoder_sym
         self._oracle_decoder_sym= oracle_decoder_sym
@@ -125,8 +125,14 @@ class HereditaryGeometryDiscovery():
         self._n_samples=tasks_ps[0][:,0].shape[0]
         self.task_idxs = list(range(self._n_tasks))
         self.task_idxs.remove(self.base_task_index)
-        self.frame_base_task= self.tasks_frameestimators[self.base_task_index]
-        self.frame_i_tasks= [self.tasks_frameestimators[i] for i in self.task_idxs]
+
+        if self._use_oracle_frames:
+            warnings.warn("Using oracle kernel frames.")
+            self.frame_base_task= self._oracle_frames[self.base_task_index]
+            self.frame_i_tasks= [self._oracle_frames[i] for i in self.task_idxs]            
+        else:    
+            self.frame_base_task= self.tasks_frameestimators[self.base_task_index]
+            self.frame_i_tasks= [self.tasks_frameestimators[i] for i in self.task_idxs]
 
         # Store losses and diagnostics.
         self._losses, self._diagnostics={}, {}
@@ -168,19 +174,9 @@ class HereditaryGeometryDiscovery():
         lg_ps = decoder_geo(lg_tilde_ps)
 
         # 2. Sample tangent vectors and push-forward tangent vectors
-        if not self._use_oracle_rotation_kernel:
-            frame_ps=self.frame_base_task.evaluate(ps, bandwidth=self.bandwidth).transpose(-1, -2)
-            frames_i_lg_ps = torch.stack([
-                self.frame_i_tasks[i].evaluate(lg_ps[i], bandwidth=self.bandwidth)
-                for i in range(self._n_tasks-1)], dim=0).transpose(-1, -2)
-            
-        else:
-            # Use oracle rotation kernel
-            frame_ps = self.rotation_vector_field(ps, center=self.task_specifications[self.base_task_index]['goal'])
-            goals = torch.stack([self.task_specifications[i]['goal'].clone().detach() for i in self.task_idxs])
-            frames_i_lg_ps = torch.stack([
-                self.rotation_vector_field(lg_ps[i], center=goals[i])
-                for i in range(lg_ps.shape[0])], dim=0)
+        frame_ps= self.frame_base_task(ps)
+        frames_i_lg_ps = torch.stack([self.frame_i_tasks[idx_task](lg_ps[idx_task]) for idx_task in self.task_idxs], dim=0)
+
         
         jac_lgs = self.compute_vec_jacobian(encoded_left_action, ps)
         lgs_frame_ps = torch.einsum("bNmn,bdn->Nbdm", jac_lgs, frame_ps)
@@ -291,11 +287,10 @@ class HereditaryGeometryDiscovery():
         gen_ps = torch.einsum("bdmn, bdn->bdm", jac_decoder_sym, gen_tilde_ps)
 
         # Check symmetry, need to evaluate frame at base points.
-        #TODO, using ground truth kernel distribution.
-        goal_base = self.task_specifications[self.base_task_index]['goal']
-        frame_ps= self.rotation_vector_field(ps, center=goal_base)
+        frame_ps=self.frame_base_task(ps)
         frame_ps=frame_ps.unsqueeze(0)
 
+        # Evaluate how far out of the kernel distribution the generator is.
         _, gen_into_frame = self._project_onto_vector_subspace(gen_ps, frame_ps)
 
         loss_symmetry= torch.linalg.vector_norm(gen_into_frame, dim=-1).mean(-1).mean()
