@@ -18,3 +18,11 @@ class DenseNN(th.nn.Module):
 
     def forward(self, x):
         return self.net(x)
+    
+
+def get_non_default_args(parser, parsed_args) -> dict:
+    """Returns all non-default arguments from the parsed args."""
+    defaults = parser.parse_args([])
+    return {
+    k: v for k, v in vars(parsed_args).items()
+    if getattr(parsed_args, k) != getattr(defaults, k)}

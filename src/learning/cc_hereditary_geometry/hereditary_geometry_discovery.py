@@ -21,7 +21,6 @@ class HereditaryGeometryDiscovery():
                  tasks_frameestimators: List[callable],
                  enc_geo_net_sizes: list[int],
                  enc_sym_net_sizes: list[int],
-                 eval_sym_in_follower: bool,
 
                  kernel_dim: int,
                  update_chart_every_n_steps:int,
@@ -108,7 +107,6 @@ class HereditaryGeometryDiscovery():
         self._log_wandb_gradients=log_wandb_gradients
         self._save_every= save_every
         
-        self._eval_sym_in_follower = eval_sym_in_follower
         self._use_oracle_frames=use_oracle_frames
         self._oracle_frames=oracle_frames
         self._save_dir=save_dir

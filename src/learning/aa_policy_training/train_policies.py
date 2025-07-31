@@ -25,14 +25,14 @@ def train_and_save_pi_and_buffer(task_env,
 
 def train_and_save_pis_and_buffers(tasks: list,
                    save_dir:str,
-                   argparser)->list:
+                   args)->list:
     """Trains policies for each task in the list and saves them along with their replay buffers. Returns the directions of the tasks."""
     dirs=[]
     for idx_task, task in enumerate(tasks):
         train_and_save_pi_and_buffer(task_env=task, 
                             save_dir=f"{save_dir}/task_{idx_task}", 
-                            seed=argparser.seed, 
-                            n_envs=argparser.n_envs, 
-                            N_steps=argparser.n_steps_train_pis)
+                            seed=args.seed, 
+                            n_envs=args.n_envs, 
+                            N_steps=args.n_steps_train_pis)
         dirs.append(f"{save_dir}/task_{idx_task}")
     return dirs

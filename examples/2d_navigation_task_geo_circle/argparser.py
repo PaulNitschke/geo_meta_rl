@@ -40,22 +40,15 @@ def get_argparser():
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--bandwidth", type=float, default=None, help="Bandwidth for the kernel") #TODO, need to take this out.
     parser.add_argument("--log_wandb", type=str2bool, default="true", help="Whether to log results to Weights & Biases.")
+    parser.add_argument("--wandb_project_name", type=str, default="circle_hereditary_geometry_discovery", help="Project name for wandb.")
     parser.add_argument("--log_wandb_gradients", type=str2bool, default="false", help="Whether to log network gradients to Weights & Biases.")
     parser.add_argument("--save_every", type=int, default=10_000, help="Checkpoint frequency.")
 
     # Debugging parameters.
-    parser.add_argument("--eval_sym_in_follower", type=str2bool, default = "false", help="Whether to include the symmetry loss in the follower loss.")
     parser.add_argument("--learn_generator", type=str2bool, default="true", help="Whether to learn the generator, only used for debugging.")
-    parser.add_argument("--use_oracle_rotation_kernel", type=str2bool, default="true", help="Whether to use the hard-coded oracle rotation kernel, only used for debugging.")
+    parser.add_argument("--use_oracle_frame", type=str2bool, default="true", help="Whether to use the hard-coded oracle rotation kernel, only used for debugging.")
 
     return parser
-
-def get_non_default_args(parser, parsed_args) -> dict:
-    """Returns all non-default arguments from the parsed args."""
-    defaults = parser.parse_args([])
-    return {
-    k: v for k, v in vars(parsed_args).items()
-    if getattr(parsed_args, k) != getattr(defaults, k)}
 
 def str2bool(v):
     if isinstance(v, bool):

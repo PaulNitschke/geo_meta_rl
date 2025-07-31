@@ -6,19 +6,19 @@ from ..aa_policy_training.utils import load_replay_buffer
 
 
 def compute_and_save_kernel_bases(dir: str,
-                                  argparser):
+                                  args):
     """
     Learn pointwise kernel bases from a replay buffer.
     """
     replay_buffer_name:str=dir+"/replay_buffer.pkl"
-    replay_buffer = load_replay_buffer(replay_buffer_name, N_steps=argparser.n_samples)
-    assert argparser.kernel_in in replay_buffer.keys(), f"Kernel input {argparser.kernel_in} not found in replay buffer keys: {replay_buffer.keys()}"
-    assert argparser.kernel_out in replay_buffer.keys(), f"Kernel output {argparser.kernel_out} not found in replay buffer keys: {replay_buffer.keys()}"
+    replay_buffer = load_replay_buffer(replay_buffer_name, N_steps=args.n_samples)
+    assert args.kernel_in in replay_buffer.keys(), f"Kernel input {args.kernel_in} not found in replay buffer keys: {replay_buffer.keys()}"
+    assert args.kernel_out in replay_buffer.keys(), f"Kernel output {args.kernel_out} not found in replay buffer keys: {replay_buffer.keys()}"
     
-    ps = replay_buffer[argparser.kernel_in]
-    ns = replay_buffer[argparser.kernel_out]
+    ps = replay_buffer[args.kernel_in]
+    ns = replay_buffer[args.kernel_out]
 
-    frame_estimator = KernelFrameEstimator(ps=ps, kernel_dim=argparser.kernel_dim, ns=ns, epsilon_ball=argparser.epsilon_ball, epsilon_level_set=argparser.epsilon_level_set)
+    frame_estimator = KernelFrameEstimator(ps=ps, kernel_dim=args.kernel_dim, ns=ns, epsilon_ball=args.epsilon_ball, epsilon_level_set=args.epsilon_level_set)
     frame_estimator.compute()
 
     kernel_bases_name = f"{dir}/kernel_bases.pkl"
