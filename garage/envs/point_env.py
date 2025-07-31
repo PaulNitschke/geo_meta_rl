@@ -190,7 +190,8 @@ class PointEnv(Environment):
 
     # pylint: disable=no-self-use
     def sample_tasks(self, num_tasks,
-                     mode: str="uniform"):
+                     mode: str="uniform",
+                     chart: np.array=None):
         """Sample a list of `num_tasks` tasks. Tasks are uniformly distributed on circle with radius 1.
 
         Args:
@@ -202,15 +203,22 @@ class PointEnv(Environment):
                 point in 2D space.
 
         """
+        # How to sample goals on the task distribution.
         if mode=="uniform":
             angles = np.random.uniform(0, 2 * math.pi, num_tasks)
         elif mode=="linspace":
             angles = np.linspace(0, 2 * math.pi, num_tasks, endpoint=False)
         else:
             raise ValueError(f"Unknown mode: {mode}")
-        radius=1
-        x = radius * np.cos(angles)
-        y = radius * np.sin(angles)
+        
+
+        # 1. Define task distribution
+        chart = np.eye(2) if chart is None else chart
+        coordinates = np.matmul(chart, np.vstack([np.cos(angles), np.sin(angles)]))
+        x = coordinates[0, :]
+        y = coordinates[1, :]
+
+
         goals = [np.array([x[i], y[i]]) for i in range(num_tasks)]
         tasks = [{'goal': goal} for goal in goals]
 
