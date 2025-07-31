@@ -2,6 +2,11 @@ import argparse
 
 def get_argparser():
     parser = argparse.ArgumentParser(description="Hereditary Geometry Discovery Experiment Configuration")
+
+    # Parameters to create task distribution and train policies.
+    parser.add_argument("--n_steps_train_pis", type=int, default=100_000, help="Number of steps to train each policy for.")
+    parser.add_argument("--n_tasks", type=int, default=4, help="Number of tasks to generate.")
+    parser.add_argument("--n_envs", type=int, default=2, help="Number of parallel environments to use when training policies.")
     
     # Main parameters.
     parser.add_argument("--kernel_dim", type=int, default=1, help="Dimension of the kernel")

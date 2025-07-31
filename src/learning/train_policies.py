@@ -5,8 +5,8 @@ from src.utils import GarageToGymWrapper
 
 # Training setup
 
-def train_and_save_policy(task_env, 
-                          task_name,
+def train_and_save_pi_and_buffer(task_env, 
+                          save_dir,
                           seed:int,
                           n_envs:int,
                           N_steps:int,
@@ -18,5 +18,16 @@ def train_and_save_policy(task_env,
     pi = SAC("MlpPolicy", vec_env, verbose=1, seed=seed, batch_size=batch_size)
     pi.learn(total_timesteps=N_steps)
     
-    pi.save(task_name)
-    pi.save_replay_buffer(task_name+ "_replay_buffer")
+    pi.save(save_dir)
+    pi.save_replay_buffer(save_dir+ "_replay_buffer")
+
+def train_and_save_pis_and_buffers(tasks: list,
+                   save_dir:str,
+                   argparser):
+
+    for idx_task, task in enumerate(tasks):
+        train_and_save_pi_and_buffer(task_env=task, 
+                            save_dir=f"{save_dir}/task_{idx_task}", 
+                            seed=argparser.seed, 
+                            n_envs=argparser.n_envs, 
+                            N_steps=argparser.n_steps_train_pis)
