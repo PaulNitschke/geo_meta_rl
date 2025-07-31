@@ -1,3 +1,5 @@
+import numpy as np
+
 from stable_baselines3 import SAC
 from stable_baselines3.common.env_util import make_vec_env
 
@@ -18,16 +20,19 @@ def train_and_save_pi_and_buffer(task_env,
     pi = SAC("MlpPolicy", vec_env, verbose=1, seed=seed, batch_size=batch_size)
     pi.learn(total_timesteps=N_steps)
     
-    pi.save(save_dir)
-    pi.save_replay_buffer(save_dir+ "_replay_buffer")
+    pi.save(save_dir+"/policy")
+    pi.save_replay_buffer(save_dir+ "/replay_buffer")
 
 def train_and_save_pis_and_buffers(tasks: list,
                    save_dir:str,
-                   argparser):
-
+                   argparser)->list:
+    """Trains policies for each task in the list and saves them along with their replay buffers. Returns the directions of the tasks."""
+    dirs=[]
     for idx_task, task in enumerate(tasks):
         train_and_save_pi_and_buffer(task_env=task, 
                             save_dir=f"{save_dir}/task_{idx_task}", 
                             seed=argparser.seed, 
                             n_envs=argparser.n_envs, 
                             N_steps=argparser.n_steps_train_pis)
+        dirs.append(f"{save_dir}/task_{idx_task}")
+    return dirs

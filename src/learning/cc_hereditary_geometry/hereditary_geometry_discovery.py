@@ -11,7 +11,7 @@ import torch
 import wandb
 
 
-from ..initialization import identity_init_neural_net, ExponentialLinearRegressor
+from .initialization import identity_init_neural_net, ExponentialLinearRegressor
 
 
 class HereditaryGeometryDiscovery():

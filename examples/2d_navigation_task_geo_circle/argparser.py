@@ -7,9 +7,15 @@ def get_argparser():
     parser.add_argument("--n_steps_train_pis", type=int, default=100_000, help="Number of steps to train each policy for.")
     parser.add_argument("--n_tasks", type=int, default=4, help="Number of tasks to generate.")
     parser.add_argument("--n_envs", type=int, default=2, help="Number of parallel environments to use when training policies.")
-    
-    # Main parameters.
+
+    # Parameters for learning symmetry.
+    parser.add_argument("--kernel_in", type=str, help="Input for the kernel learning, e.g. p.")
+    parser.add_argument("--kernel_out", type=int, default=128, help="Output for the kernel learning, e.g. n.")
+    parser.add_argument("--epsilon_ball", type=float, default=0.005, help="Tolerance under which f(p') \approx f(p).")
+    parser.add_argument("--epsilon_level_set", type=float, default=0.005, help="Ball in which we Taylor approximate f(p).")
     parser.add_argument("--kernel_dim", type=int, default=1, help="Dimension of the kernel")
+
+    # Main parameters.
     parser.add_argument("--update_chart_every_n_steps", type=int, default=150, help="Update chart every n steps")
     parser.add_argument("--eval_span_how", type=str, choices=["weights", "ortho_comp"], default="weights", help="How to evaluate span")
     parser.add_argument("--n_steps_lgs", type=int, default=10_000, help="Number of optimization steps for the left action discovery (usually higher).")

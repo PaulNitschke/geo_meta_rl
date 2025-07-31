@@ -3,7 +3,7 @@ import wandb
 import torch
 from datetime import datetime
 
-from src.learning.symmetry.hereditary_geometry_discovery import HereditaryGeometryDiscovery
+from src.learning.cc_hereditary_geometry.hereditary_geometry_discovery import HereditaryGeometryDiscovery
 from argparser import get_argparser, get_non_default_args
 from src.utils import load_replay_buffer_and_kernel, Affine2D
 
