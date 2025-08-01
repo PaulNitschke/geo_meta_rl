@@ -3,7 +3,7 @@ import numpy as np
 from stable_baselines3 import SAC
 from stable_baselines3.common.env_util import make_vec_env
 
-from utils import GarageToGymWrapper
+from src.learning.aa_policy_training.utils import GarageToGymWrapper
 
 # Training setup
 

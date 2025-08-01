@@ -1,8 +1,5 @@
-import os
-import pickle
-
-from kernel_approx import KernelFrameEstimator
-from ..aa_policy_training.utils import load_replay_buffer
+from src.learning.aa_policy_training.utils import load_replay_buffer
+from src.learning.bb_symmetry.kernel_approx import KernelFrameEstimator
 
 
 def compute_and_save_kernel_bases(dir: str,

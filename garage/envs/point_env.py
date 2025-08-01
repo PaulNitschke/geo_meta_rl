@@ -236,3 +236,4 @@ class PointEnv(Environment):
         """
         self._task = task
         self._goal = task['goal']
+        return self
