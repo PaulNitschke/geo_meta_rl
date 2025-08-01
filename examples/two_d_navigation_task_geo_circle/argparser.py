@@ -11,13 +11,14 @@ def get_argparser():
 
     # Parameters for learning symmetry.
     parser.add_argument("--compute_kernel", type=str2bool, default="false", help="Whether to compute kernel distribution.")
-    parser.add_argument("--kernel_in", type=str, help="Input for the kernel learning, e.g. p.")
-    parser.add_argument("--kernel_out", type=int, default=128, help="Output for the kernel learning, e.g. n.")
+    parser.add_argument("--kernel_in", type=str, default="next_observations", help="Input for the kernel learning, e.g. p. One of ['observations', 'actions', 'next_observations', 'rewards'].")
+    parser.add_argument("--kernel_out", type=str, default="rewards", help="Output for the kernel learning, e.g. n. One of ['observations', 'actions', 'next_observations', 'rewards'].")
     parser.add_argument("--epsilon_ball", type=float, default=0.005, help="Tolerance under which f(p') \approx f(p).")
     parser.add_argument("--epsilon_level_set", type=float, default=0.005, help="Ball in which we Taylor approximate f(p).")
     parser.add_argument("--kernel_dim", type=int, default=1, help="Dimension of the kernel")
 
     ######## From here on all parameters for hereditary symmetry discovery.#########
+    parser.add_argument("--learn_hereditary_symmetry", type=str2bool, default="false", help="Whether to perform hereditary symmetry discovery.")
     # Main parameters.
     parser.add_argument("--update_chart_every_n_steps", type=int, default=150, help="Update chart every n steps")
     parser.add_argument("--eval_span_how", type=str, choices=["weights", "ortho_comp"], default="weights", help="How to evaluate span")

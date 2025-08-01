@@ -77,8 +77,15 @@ else:
 
 #TODO, here we need to compute the frame estimator via a neural network.
 
-logging.info("Starting hereditary geometry discovery...")
-learn_hereditary_symmetry(dirs=task_dirs,
-                          parser=parser,
-                          oracles=ORACLES)
-logging.info("Finished hereditary geometry discovery.")
+if args.learn_hereditary_symmetry:
+    logging.info("Starting hereditary geometry discovery...")
+    learn_hereditary_symmetry(dirs=task_dirs,
+                            parser=parser,
+                            oracles=ORACLES)
+    logging.info("Finished hereditary geometry discovery.")
+else:
+    logging.info("Skipping hereditary geometry discovery, using pre-computed charts.")
+    #TODO, here we need to load the pre-computed charts.
+    # This is not implemented yet, but we assume that the charts are already computed and saved in the task directories.
+    # For now, we just log this information.
+    logging.info("Assuming pre-computed charts are available in the task directories.")

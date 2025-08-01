@@ -36,8 +36,8 @@ def learn_hereditary_symmetry(dirs,
     _run_name = '_'.join(f"{k}:{v}" for k, v in non_default_args.items()) if non_default_args else "default"
     run_name = _run_name + '_' + datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     save_dir=os.path.join(os.path.dirname(dirs[0]), "wandb",run_name)
-    os.mkdir(save_dir)
-    os.mkdir(save_dir + "/pretrain")
+    os.makedirs(save_dir)
+    os.makedirs(save_dir + "/pretrain")
 
     if args.log_wandb:
         wandb.init(project=args.wandb_project_name,name=run_name,config=vars(args))

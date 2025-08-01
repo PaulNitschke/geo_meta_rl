@@ -8,7 +8,8 @@ def compute_and_save_kernel_bases(dir: str,
     Learn pointwise kernel bases from a replay buffer.
     """
     replay_buffer_name:str=dir+"/replay_buffer.pkl"
-    replay_buffer = load_replay_buffer(replay_buffer_name, N_steps=args.n_samples)
+    n_steps=int(args.n_steps_train_pis/args.n_envs)
+    replay_buffer = load_replay_buffer(replay_buffer_name, N_steps=n_steps)
     assert args.kernel_in in replay_buffer.keys(), f"Kernel input {args.kernel_in} not found in replay buffer keys: {replay_buffer.keys()}"
     assert args.kernel_out in replay_buffer.keys(), f"Kernel output {args.kernel_out} not found in replay buffer keys: {replay_buffer.keys()}"
     
